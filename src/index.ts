@@ -2,14 +2,10 @@ import { App, AwsLambdaReceiver } from '@slack/bolt';
 
 import dotenv from 'dotenv';
 import {
-  handleConfirmPRReview,
-  handleRequestPRReview,
-  handleGetURLs,
-  handleSelectPRReviewProject,
-  handleSelectURLListProject,
-  handleSelectSlackTemplate,
   handleGetSlackTemplate,
-} from './handler';
+  handleSelectSlackTemplate,
+} from './handler/slackTemplate';
+import { handleGetSsmCommand } from './handler/ssmCommand';
 
 dotenv.config();
 
@@ -55,16 +51,16 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond, say, client }) => {
           //   value: 'pr_review',
           //   action_id: 'pr_review',
           // },
-          {
-            type: 'button',
-            text: {
-              type: 'plain_text',
-              text: '📕 페이지 목록',
-              emoji: true,
-            },
-            value: 'url_list',
-            action_id: 'url_list',
-          },
+          // {
+          //   type: 'button',
+          //   text: {
+          //     type: 'plain_text',
+          //     text: '📕 페이지 목록',
+          //     emoji: true,
+          //   },
+          //   value: 'url_list',
+          //   action_id: 'url_list',
+          // },
           {
             type: 'button',
             text: {
@@ -74,6 +70,16 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond, say, client }) => {
             },
             value: 'slack_template',
             action_id: 'slack_template',
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'EC2 SSM 명령어',
+              emoji: true,
+            },
+            value: 'ssm_command',
+            action_id: 'ssm_command',
           },
           // {
           //   type: 'button',
@@ -102,24 +108,24 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond, say, client }) => {
 });
 
 // PR 검토 요청 액션
-app.action('pr_review', handleSelectPRReviewProject);
-app.action(/^.*_pr_review$/, handleRequestPRReview);
-app.action('confirm_pr', handleConfirmPRReview);
-app.action('reject_pr', async ({ ack, respond }) => {
-  await ack();
-  await respond('PR 요청이 취소되었습니다.');
-});
+// app.action('pr_review', handleSelectPRReviewProject);
+// app.action(/^.*_pr_review$/, handleRequestPRReview);
+// app.action('confirm_pr', handleConfirmPRReview);
+// app.action('reject_pr', async ({ ack, respond }) => {
+//   await ack();
+//   await respond('PR 요청이 취소되었습니다.');
+// });
 
 // 페이지 목록 액션
-app.action('url_list', handleSelectURLListProject);
-app.action(/^.*_url_list$/, handleGetURLs);
+// app.action('url_list', handleSelectURLListProject);
+// app.action(/^.*_url_list$/, handleGetURLs);
 
 // 슬랙 템플릿 액션
 app.action('slack_template', handleSelectSlackTemplate);
-app.action('cpo_bo_deploy', handleGetSlackTemplate);
+app.action(/^.*_slack_template$/, handleGetSlackTemplate);
 
-// 계정 목록 액션
-app.action('account_list', async ({ ack, respond }) => {});
+// Session Manager Command 액션
+app.action('ssm_command', handleGetSsmCommand);
 
 // Handle the Lambda function event
 export const handler = async (event: any, context: any, callback: any) => {
