@@ -1,4 +1,8 @@
-import { KnownBlock } from '@slack/bolt';
+import {
+  BlockAction,
+  KnownBlock,
+  SlackActionMiddlewareArgs,
+} from '@slack/bolt';
 import _ from 'lodash';
 import { InputItem } from './types';
 
@@ -35,4 +39,28 @@ export const generateSlackLinkBlocks = (input: InputItem[]): KnownBlock[] => {
   blocks.pop();
 
   return blocks;
+};
+
+export const makeTextRespond = async ({
+  respond,
+  text,
+}: {
+  respond?: SlackActionMiddlewareArgs<BlockAction>['respond'];
+  text: string;
+}) => {
+  const blocks = [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text,
+      },
+    },
+  ];
+
+  if (respond) {
+    await respond({ blocks });
+  }
+
+  return { blocks }; // respond 없이 사용하고 싶을 때를 위해 반환
 };

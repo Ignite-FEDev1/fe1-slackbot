@@ -1,11 +1,11 @@
 {
-  "name": "slackbot_test",
+  "name": "fe1_slack_bot",
   "version": "0.1.0",
   "description": "",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "deploy": "npm run build && serverless deploy",
+    "deploy": "npm run build && export NODE_TLS_REJECT_UNAUTHORIZED=0 sls deploy",
     "offline": "npm run build && serverless offline",
     "build": "esbuild src/index.ts --bundle --platform=node --outfile=app.js --format=cjs",
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -26,6 +26,7 @@
     "@slack/bolt": "^3.19.0",
     "@types/axios": "^0.14.0",
     "axios": "^1.7.2",
+    "date-fns": "^4.1.0",
     "dotenv": "^16.4.5",
     "esbuild": "^0.23.0",
     "express": "^4.19.2",

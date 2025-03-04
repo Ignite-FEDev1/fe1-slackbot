@@ -6,6 +6,12 @@ import {
   handleSelectSlackTemplate,
 } from './handler/slackTemplate';
 import { handleGetSsmCommand } from './handler/ssmCommand';
+import {
+  handleCreateDailyPage,
+  handleCreateNextDailyPage,
+  handleGetDailyPage,
+  handleGetWeeklyPage,
+} from './handler/dailyPage';
 
 dotenv.config();
 
@@ -13,7 +19,7 @@ const receiver = new AwsLambdaReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET || '',
 });
 
-const app = new App({
+export const app = new App({
   token: process.env.SLACK_BOT_TOKEN || '',
   signingSecret: process.env.SLACK_SIGNING_SECRET || '',
   receiver,
@@ -34,33 +40,12 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond, say, client }) => {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `${command.user_name}님 반갑습니다!\n어떤 작업을 도와드릴까요? 아직은 할 수 있는게 많지 않아요. 🙂`,
+          text: `${command.user_name}님 반갑습니다!\n어떤 작업을 도와드릴까요? 🤖`,
         },
       },
       {
         type: 'actions',
         elements: [
-          // gitlab 이관되며 임시 deprecated
-          // {
-          //   type: 'button',
-          //   text: {
-          //     type: 'plain_text',
-          //     text: '내 최신 PR 검토 요청하기',
-          //     emoji: true,
-          //   },
-          //   value: 'pr_review',
-          //   action_id: 'pr_review',
-          // },
-          // {
-          //   type: 'button',
-          //   text: {
-          //     type: 'plain_text',
-          //     text: '📕 페이지 목록',
-          //     emoji: true,
-          //   },
-          //   value: 'url_list',
-          //   action_id: 'url_list',
-          // },
           {
             type: 'button',
             text: {
@@ -75,54 +60,61 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond, say, client }) => {
             type: 'button',
             text: {
               type: 'plain_text',
+              text: '데일리',
+              emoji: true,
+            },
+            value: 'daily_page',
+            action_id: 'daily_page',
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: '위클리',
+              emoji: true,
+            },
+            value: 'weekly_page',
+            action_id: 'weekly_page',
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: '데일리 페이지 만들기',
+              emoji: true,
+            },
+            value: 'create_daily_page',
+            action_id: 'create_daily_page',
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
               text: 'EC2 SSM 명령어',
               emoji: true,
             },
             value: 'ssm_command',
             action_id: 'ssm_command',
           },
-          // {
-          //   type: 'button',
-          //   text: {
-          //     type: 'plain_text',
-          //     text: '서비스 계정 목록',
-          //     emoji: true,
-          //   },
-          //   value: 'account_list',
-          //   action_id: 'account_list',
-          // },
-          // {
-          //   type: 'button',
-          //   text: {
-          //     type: 'plain_text',
-          //     text: '슬랙 템플릿 목록',
-          //     emoji: true,
-          //   },
-          //   value: 'slack_template',
-          //   action_id: 'slack_template',
-          // },
         ],
       },
     ],
   });
 });
 
-// PR 검토 요청 액션
-// app.action('pr_review', handleSelectPRReviewProject);
-// app.action(/^.*_pr_review$/, handleRequestPRReview);
-// app.action('confirm_pr', handleConfirmPRReview);
-// app.action('reject_pr', async ({ ack, respond }) => {
-//   await ack();
-//   await respond('PR 요청이 취소되었습니다.');
-// });
-
-// 페이지 목록 액션
-// app.action('url_list', handleSelectURLListProject);
-// app.action(/^.*_url_list$/, handleGetURLs);
-
 // 슬랙 템플릿 액션
 app.action('slack_template', handleSelectSlackTemplate);
 app.action(/^.*_slack_template$/, handleGetSlackTemplate);
+
+// 데일리 페이지 액션
+app.action('daily_page', handleGetDailyPage);
+
+// 데일리 페이지 생성
+app.action('create_daily_page', handleCreateDailyPage);
+app.action('create_next_daily_page', handleCreateNextDailyPage);
+
+// 위클리 페이지 액션
+app.action('weekly_page', handleGetWeeklyPage);
 
 // Session Manager Command 액션
 app.action('ssm_command', handleGetSsmCommand);

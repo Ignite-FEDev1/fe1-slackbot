@@ -1,6 +1,12 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { getUserId as getSlackUserId } from '.';
 import { SLACK_GITHUB_USER_MAP } from './constant';
+import { JiraPage, JiraPageResponse, ParsedJiraPage } from './types/jira';
+
+const auth = {
+  username: 'ssj@ignite.co.kr',
+  password: process.env.ATLASSIAN_TOKEN || '',
+};
 
 export const getLatestGitHubPR = async (
   owner: string,
@@ -165,6 +171,103 @@ export const getLatestCPODeployPages = async () => {
   }
 };
 
+export const getLatestPages = async (
+  containerId: string,
+  count: number = 10
+) => {
+  try {
+    const childPageUrl = `https://ignitecorp.atlassian.net/wiki/rest/api/content/${containerId}/child/page`;
+
+    if (!auth.password) {
+      return null;
+    }
+
+    const response = await axios.get<JiraPageResponse>(childPageUrl, { auth });
+
+    if (!response?.data?.results || response.data.results.length === 0) {
+      return null;
+    }
+
+    // 최신 페이지 3개를 담을 배열 초기화
+    let pages: JiraPage[] = [];
+
+    // latestMonthPage 자식 페이지 추가
+    if (response?.data?.results && response.data.results.length > 0) {
+      pages = response.data.results.slice(-1 * count);
+    }
+
+    // 반환할 페이지 정보 구성
+    const results: ParsedJiraPage[] = pages
+      .map(
+        (page: {
+          title?: string;
+          _links?: { webui?: string };
+          id: string;
+        }) => ({
+          name: page.title || '',
+          url: page._links?.webui
+            ? `https://ignitecorp.atlassian.net/wiki${page._links.webui}`
+            : '',
+          id: page.id,
+        })
+      )
+      .filter((page: { name?: string; url?: string }) => page.name && page.url);
+
+    return results.length > 0 ? results : null;
+  } catch (e) {
+    console.log(e);
+    return null;
+  }
+};
+
+export const getPageContent = async (pageId: string) => {
+  try {
+    const pageUrl = `https://ignitecorp.atlassian.net/wiki/rest/api/content/${pageId}?expand=body.storage`;
+
+    const response = await axios.get(pageUrl, { auth });
+
+    if (!response?.data || !response.data.body?.storage?.value) return null;
+
+    return {
+      title: response.data.title,
+      body: response.data.body.storage.value, // 원본 페이지 내용 (HTML)
+    };
+  } catch (e) {
+    logSimplifiedError(e);
+    return null;
+  }
+};
+
+export const createNewPage = async (
+  containerId: string,
+  content: string,
+  title: string
+) => {
+  try {
+    const createPageUrl = `https://ignitecorp.atlassian.net/wiki/rest/api/content`;
+
+    const newPageData = {
+      type: 'page',
+      title, // 새로운 제목
+      ancestors: [{ id: containerId }], // 부모 페이지 설정
+      space: { key: 'IF' }, // 스페이스 키 설정
+      body: {
+        storage: {
+          value: content, // 원본 페이지 내용 유지
+          representation: 'storage',
+        },
+      },
+    };
+
+    const response = await axios.post(createPageUrl, newPageData, { auth });
+
+    return response.data;
+  } catch (e) {
+    logSimplifiedError(e);
+    return null;
+  }
+};
+
 export const getLatestChildPage = async (pageId: string) => {
   try {
     const auth = {
@@ -195,4 +298,40 @@ export const getLatestChildPage = async (pageId: string) => {
   } catch (e) {
     return null;
   }
+};
+
+export const logSimplifiedError = (error: unknown) => {
+  // AxiosError가 아닌 경우 빠르게 반환
+  if (!(error instanceof AxiosError)) {
+    console.log('Non-Axios Error:');
+    console.log(error);
+    return;
+  }
+
+  // 서버 응답이 있을 경우
+  if (error.response) {
+    console.log('Error Response:', {
+      status: error.response.status,
+      statusText: error.response.statusText,
+      data: error.response.data,
+    });
+  } else if (error.request) {
+    console.log('Error Request:', {
+      request: error.request,
+    });
+  }
+
+  // 설정 중 발생한 오류
+  console.log('Error Message:', {
+    message: error.message,
+  });
+
+  // 요청 설정 정보는 항상 출력
+  console.log('Request Config:', {
+    method: error.config?.method,
+    url: error.config?.url,
+    headers: error.config?.headers,
+    params: error.config?.params,
+    data: error.config?.data,
+  });
 };

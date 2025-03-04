@@ -3,8 +3,10 @@ frameworkVersion: '4'
 
 provider:
   name: aws
+  profile: default
+  region: ap-northeast-2
+
   runtime: nodejs20.x
-  region: ap-northeast-2 # 원하는 리전으로 변경
   stage: prod # 기본 stage를 "prod"로 설정
   environment:
     SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
