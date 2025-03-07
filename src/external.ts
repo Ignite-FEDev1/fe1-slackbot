@@ -1,11 +1,97 @@
 import axios, { AxiosError } from 'axios';
-import { getUserId as getSlackUserId } from '.';
-import { SLACK_GITHUB_USER_MAP } from './constant';
-import { JiraPage, JiraPageResponse, ParsedJiraPage } from './types/jira';
+import { getUserId as getSlackUserId, getUserId } from '.';
+import { SLACK_GITHUB_USER_MAP, SLACK_JIRA_USER_MAP } from './constant';
+import {
+  JiraIssue,
+  JiraIssueResponse,
+  JiraPage,
+  JiraPageResponse,
+  ParsedJiraPage,
+  ParsedJiraTask,
+} from './types/jira';
 
 const auth = {
   username: 'ssj@ignite.co.kr',
   password: process.env.ATLASSIAN_TOKEN || '',
+};
+
+export const getJirIssues = async (
+  jql: string
+): Promise<ParsedJiraTask[] | null> => {
+  try {
+    const jiraApiUrl = `https://ignite
+corp.atlassian.net/rest/agile/1.0/board/251/issue?jql=${encodeURIComponent(
+      jql
+    )}`;
+
+    if (!auth.password) {
+      return null;
+    }
+
+    const response = await axios.get<JiraIssueResponse>(jiraApiUrl, { auth });
+
+    if (!response?.data?.issues || response.data.issues.length === 0) {
+      return null;
+    }
+
+    const tasks: ParsedJiraTask[] = response.data.issues.map((issue) => ({
+      id: issue.id,
+      key: issue.key,
+      name: issue.fields.summary || '',
+      status: issue.fields.status.name || '',
+      url: `https://ignitecorp.atlassian.net/browse/${issue.key}`,
+    }));
+
+    return tasks.length > 0 ? tasks : null;
+  } catch (e) {
+    console.error('Error fetching Jira tasks:', e);
+    return null;
+  }
+};
+
+export const getTodayJiraIssues = async (): Promise<
+  ParsedJiraTask[] | null
+> => {
+  try {
+    // JQL을 활용하여 오늘 해야 할 일 조회
+    const jql = `assignee IN (${
+      SLACK_JIRA_USER_MAP[getUserId()]
+    }) AND "start date[date]" <= now() AND due >= now() ORDER BY updated DESC`;
+    return await getJirIssues(jql);
+  } catch (e) {
+    console.error('Error fetching Jira tasks:', e);
+    return null;
+  }
+};
+
+export const getNotStartedJiraIssues = async (): Promise<
+  ParsedJiraTask[] | null
+> => {
+  try {
+    // JQL을 활용하여 아직 시작하지 않은 일 조회
+    const jql = `assignee IN (${
+      SLACK_JIRA_USER_MAP[getUserId()]
+    }) AND "start date[date]" <= now() AND status NOT IN (TODO, "To Do") ORDER BY updated DESC`;
+    return await getJirIssues(jql);
+  } catch (e) {
+    console.error('Error fetching Jira tasks:', e);
+    return null;
+  }
+};
+
+export const getNotEndedJiraIssues = async (): Promise<
+  ParsedJiraTask[] | null
+> => {
+  try {
+    // JQL을 활용하여 아직 끝나지 않은 일 조회
+    const jql = `assignee IN (${
+      SLACK_JIRA_USER_MAP[getUserId()]
+    }) AND due <= now() AND status NOT IN (Done, 완료) ORDER BY updated DESC`;
+    return await getJirIssues(jql);
+  } catch (e) {
+    console.error('Error fetching Jira tasks:', e);
+    return null;
+  }
 };
 
 export const getLatestGitHubPR = async (

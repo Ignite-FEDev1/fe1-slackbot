@@ -1,5 +1,5 @@
-export interface InputItem {
-  type: string;
+export interface LinkBlockInputItem {
+  type?: string;
   name: string;
   url: string;
 }

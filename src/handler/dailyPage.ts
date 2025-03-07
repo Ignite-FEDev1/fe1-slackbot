@@ -1,10 +1,19 @@
 import {
+  Block,
   BlockAction,
+  KnownBlock,
   Middleware,
   SlackActionMiddlewareArgs,
 } from '@slack/bolt';
-import { getLatestPages, getPageContent, createNewPage } from '../external';
-import { InputItem } from '../types';
+import {
+  getLatestPages,
+  getPageContent,
+  createNewPage,
+  getTodayJiraIssues,
+  getNotStartedJiraIssues,
+  getNotEndedJiraIssues,
+} from '../external';
+import { LinkBlockInputItem } from '../types';
 import { generateSlackLinkBlocks, makeTextRespond } from '../util';
 import { addDays, format, startOfWeek } from 'date-fns';
 
@@ -17,12 +26,12 @@ export const handleGetDailyPage: Middleware<
   SlackActionMiddlewareArgs<BlockAction>
 > = async ({ ack, body, client, say, respond }) => {
   await ack();
-  const recentReleaseNotes: InputItem[] = [];
+  const recentReleaseNotes: LinkBlockInputItem[] = [];
 
   const latestDailyPages = await getLatestPages(PAGE_CONTAINER_ID.DAILY);
   if (latestDailyPages && Array.isArray(latestDailyPages)) {
     latestDailyPages.forEach((page) => {
-      recentReleaseNotes.push({ type: 'Confluence', ...page });
+      recentReleaseNotes.push(page);
     });
   }
   const slackBlocks = generateSlackLinkBlocks(recentReleaseNotes);
@@ -33,7 +42,7 @@ export const handleGetDailyPage: Middleware<
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*데일리 페이지 목록입니다. (최신 10개까지) 🤖`,
+          text: `*데일리 페이지 목록입니다. (최신 10개까지)* 🤖`,
         },
       },
       {
@@ -49,12 +58,12 @@ export const handleGetWeeklyPage: Middleware<
   SlackActionMiddlewareArgs<BlockAction>
 > = async ({ ack, body, client, say, respond }) => {
   await ack();
-  const recentDailyPages: InputItem[] = [];
+  const recentDailyPages: LinkBlockInputItem[] = [];
 
   const latestWeeklyPages = await getLatestPages(PAGE_CONTAINER_ID.WEEKLY);
   if (latestWeeklyPages && Array.isArray(latestWeeklyPages)) {
     latestWeeklyPages.forEach((page) => {
-      recentDailyPages.push({ type: 'Confluence', ...page });
+      recentDailyPages.push(page);
     });
   }
   const slackBlocks = generateSlackLinkBlocks(recentDailyPages);
@@ -65,7 +74,7 @@ export const handleGetWeeklyPage: Middleware<
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*위클리 페이지 목록입니다. (최신 10개까지) 🤖`,
+          text: `*위클리 페이지 목록입니다. (최신 10개까지)* 🤖`,
         },
       },
       {
@@ -75,6 +84,64 @@ export const handleGetWeeklyPage: Middleware<
     ],
   });
   return;
+};
+
+export const handleMyJiraIssues: Middleware<
+  SlackActionMiddlewareArgs<BlockAction>
+> = async ({ ack, body, client, say, respond }) => {
+  await ack();
+  try {
+    const results = await Promise.allSettled([
+      getTodayJiraIssues(),
+      getNotStartedJiraIssues(),
+      getNotEndedJiraIssues(),
+    ]);
+
+    const blocks: KnownBlock[] = [];
+
+    const [todayResult, notStartedResult, notEndedResult] = results;
+
+    const processIssues = (
+      result: PromiseSettledResult<any>,
+      { title, description }: { title: string; description?: string }
+    ) => {
+      if (result.status === 'fulfilled' && result.value?.length > 0) {
+        blocks.push({ type: 'divider' });
+        blocks.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `*📌 ${title}*` },
+        });
+        if (description) {
+          blocks.push({
+            type: 'section',
+            text: { type: 'mrkdwn', text: description },
+          });
+        }
+        blocks.push(...generateSlackLinkBlocks(result.value));
+      }
+    };
+
+    // 각 결과를 처리
+    processIssues(todayResult, { title: '오늘 내 할 일' });
+    processIssues(notStartedResult, {
+      title: '시작하지 않은 이슈',
+      description:
+        '시작일이 지났지만 아직 티켓 상태가 "해야할 일"인 이슈 목록입니다.',
+    });
+    processIssues(notEndedResult, {
+      title: '완료되지 않은 이슈',
+      description:
+        '완료일이 지났지만 아직 티켓 상태가 "완료"가 아닌 이슈 목록입니다.',
+    });
+
+    await respond({ blocks });
+  } catch (error) {
+    console.error(error);
+    await makeTextRespond({
+      respond,
+      text: `지라 이슈를 불러오는 중에 문제가 발생했습니다. 나중에 다시 시도해주세요. 😢`,
+    });
+  }
 };
 
 export const handleCreateDailyPage: Middleware<

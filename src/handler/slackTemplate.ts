@@ -4,7 +4,7 @@ import {
   SlackActionMiddlewareArgs,
 } from '@slack/bolt';
 import { getLatestCPODeployPages } from '../external';
-import { InputItem } from '../types';
+import { LinkBlockInputItem } from '../types';
 import { generateSlackLinkBlocks } from '../util';
 
 export const handleSelectSlackTemplate: Middleware<
@@ -56,7 +56,7 @@ export const handleGetSlackTemplate: Middleware<
 
   // CPO BO 배포 템플릿
   if ((body.actions[0] as { value: string }).value === 'cpo_bo_deploy') {
-    const recentReleaseNotes: InputItem[] = [];
+    const recentReleaseNotes: LinkBlockInputItem[] = [];
 
     const latestDeployPages = await getLatestCPODeployPages();
     if (latestDeployPages && Array.isArray(latestDeployPages)) {

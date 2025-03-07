@@ -57,3 +57,27 @@ export interface ParsedJiraPage {
   url: string;
   id: string;
 }
+
+export interface JiraIssue {
+  id: string;
+  key: string;
+  fields: {
+    summary: string;
+    startDate?: string;
+    endDate?: string;
+    status: { name: string };
+    _links?: { webui?: string };
+  };
+}
+
+export interface JiraIssueResponse {
+  issues: JiraIssue[];
+}
+
+export interface ParsedJiraTask {
+  name: string;
+  url: string;
+  id: string;
+  key: string;
+  status: string;
+}

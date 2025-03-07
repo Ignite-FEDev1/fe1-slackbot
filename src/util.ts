@@ -4,24 +4,36 @@ import {
   SlackActionMiddlewareArgs,
 } from '@slack/bolt';
 import _ from 'lodash';
-import { InputItem } from './types';
+import { LinkBlockInputItem } from './types';
 
-export const generateSlackLinkBlocks = (input: InputItem[]): KnownBlock[] => {
+export const generateSlackLinkBlocks = (
+  input: LinkBlockInputItem[]
+): KnownBlock[] => {
   const grouped = _.groupBy(input, 'type');
 
   const blocks: KnownBlock[] = [];
 
   for (const [type, items] of Object.entries(grouped)) {
-    blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*${type}*`,
-      },
-    });
+    console.log(type);
+    // if (type) {
+    //   blocks.push({
+    //     type: 'section',
+    //     text: {
+    //       type: 'mrkdwn',
+    //       text: `*${type}*`,
+    //     },
+    //   });
+    // }
 
     const linksText = items
-      .map((item) => `<${item.url}|${item.name}>`)
+      .map((item) => {
+        // '<', '>'을 HTML 엔티티로 변환하여 링크가 깨지지 않도록 함
+        const safeName = item.name
+          .replace(/</g, '&lt;') // '<' -> '&lt;'
+          .replace(/>/g, '&gt;'); // '>' -> '&gt;'
+
+        return `<${item.url}|${safeName}>`;
+      })
       .join('\n');
 
     blocks.push({
@@ -37,7 +49,6 @@ export const generateSlackLinkBlocks = (input: InputItem[]): KnownBlock[] => {
 
   // 마지막 divider 제거
   blocks.pop();
-
   return blocks;
 };
 
