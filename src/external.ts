@@ -56,7 +56,7 @@ export const getTodayJiraIssues = async (): Promise<
     // JQL을 활용하여 오늘 해야 할 일 조회
     const jql = `assignee IN (${
       SLACK_JIRA_USER_MAP[getUserId()]
-    }) AND "start date[date]" <= now() AND due >= now() ORDER BY updated DESC`;
+    }) AND "start date[date]" <= now() AND due >= now() AND NOT IN (Done, 완료) ORDER BY updated DESC`;
     return await getJirIssues(jql);
   } catch (e) {
     console.error('Error fetching Jira tasks:', e);
@@ -71,7 +71,7 @@ export const getNotStartedJiraIssues = async (): Promise<
     // JQL을 활용하여 아직 시작하지 않은 일 조회
     const jql = `assignee IN (${
       SLACK_JIRA_USER_MAP[getUserId()]
-    }) AND "start date[date]" <= now() AND status NOT IN (TODO, "To Do") ORDER BY updated DESC`;
+    }) AND "start date[date]" <= now() AND status NOT IN (TODO, "To Do", Done, 완료) ORDER BY updated DESC`;
     return await getJirIssues(jql);
   } catch (e) {
     console.error('Error fetching Jira tasks:', e);

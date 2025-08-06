@@ -6,6 +6,9 @@ import {
 import { CHANNEL_IDS, USER_GROUP_IDS } from '../constant';
 import { getLatestGitHubPR, getLatestGitLabMR } from '../external';
 
+// https://e4q2lqraf6.execute-api.ap-northeast-2.amazonaws.com/
+// https://7003d0f1a40e.ngrok-free.app/prod/slack/events
+
 export const handleSelectPRReviewProject: Middleware<
   SlackActionMiddlewareArgs<BlockAction>
 > = async ({ ack, respond }) => {

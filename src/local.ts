@@ -1,5 +1,4 @@
-import { App, AwsLambdaReceiver, Block, KnownBlock } from '@slack/bolt';
-
+import { App, Block, ExpressReceiver, KnownBlock } from '@slack/bolt';
 import dotenv from 'dotenv';
 import {
   handleCreateDailyPage,
@@ -17,8 +16,12 @@ import { handleSyncIssues } from './handler/syncIssues';
 
 dotenv.config();
 
-const receiver = new AwsLambdaReceiver({
+// Express receiver for local development
+const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET || '',
+  endpoints: {
+    events: '/slack/events',
+  },
 });
 
 export const app = new App({
@@ -157,8 +160,10 @@ app.action('sync_issues', handleSyncIssues);
 // Session Manager Command 액션
 app.action('ssm_command', handleGetSsmCommand);
 
-// Handle the Lambda function event
-export const handler = async (event: any, context: any, callback: any) => {
-  const handler = await receiver.start();
-  return handler(event, context, callback);
-};
+// Start local development server
+(async () => {
+  await app.start(3086);
+  console.log('⚡️ Bolt app is running on port 3086');
+  console.log('🌐 Ngrok URL: https://7003d0f1a40e.ngrok-free.app');
+  console.log('📡 Events endpoint: /slack/events');
+})();

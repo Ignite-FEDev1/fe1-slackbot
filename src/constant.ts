@@ -1,26 +1,36 @@
 import { LinkBlockInputItem } from './types';
 
+export const JIRA_BOARD_IDS = {
+  FEHG: 251,
+  HB: 350,
+  HDD: 37,
+};
+
 export const USER_GROUP_IDS = [
   { name: 'fe1', id: 'S06J9P5HQ2U' },
   { name: 'fe-hmgdev', id: 'S067AHD9MFZ' },
+  { name: 'hmg-board FE 개발자', id: 'S093RBN8F1T' },
+  { name: 'fe-groupware', id: 'S07NV01MHN1' },
 ];
 
 export const SLACK_GITHUB_USER_MAP = {
-  U05PV23Q8AZ: 'ignite-junho',
-  U04FBFS5SCX: 'ignite-hyunji',
-  U04D5SP327J: 'ignite-gabin',
-  U04DLF61U9K: 'ignite-sungchan',
-  U04FUFTCGCC: 'ignite-seongju',
-  U08FJ0Z9ABS: 'ignite-cykim',
+  U05PV23Q8AZ: 'ignite-junho', // 한준호
+  U04FBFS5SCX: 'ignite-hyunji', // 손현지
+  U04D5SP327J: 'ignite-gabin', // 김가빈
+  U04DLF61U9K: 'ignite-sungchan', // 박성찬
+  U04FUFTCGCC: 'ignite-seongju', // 서성주
+  U08FJ0Z9ABS: 'ignite-cykim', // 김찬영
+  U08H1QS9805: 'ignite-hanbeen', // 조한빈
 };
 
 export const SLACK_JIRA_USER_MAP: Record<string, string> = {
-  U05PV23Q8AZ: '712020:f4f9e56c-4b40-41ac-af83-5d2f774a72d5',
-  U04FBFS5SCX: '639a6767f134138b5a5132f6',
-  U04D5SP327J: '637426199e48f2b9a6108c25',
-  U04DLF61U9K: '638d49155fce844d606c7682',
-  U04FUFTCGCC: '639fa03f2c70aae1e6f79806',
-  U08FJ0Z9ABS: '712020:11fff4cb-cb95-457e-95a2-6cf9045c53b2',
+  U05PV23Q8AZ: '712020:f4f9e56c-4b40-41ac-af83-5d2f774a72d5', // 한준호
+  U04FBFS5SCX: '639a6767f134138b5a5132f6', // 손현지
+  U04D5SP327J: '637426199e48f2b9a6108c25', // 김가빈
+  U04DLF61U9K: '638d49155fce844d606c7682', // 박성찬
+  U04FUFTCGCC: '639fa03f2c70aae1e6f79806', // 서성주
+  U08FJ0Z9ABS: '712020:11fff4cb-cb95-457e-95a2-6cf9045c53b2', // 김찬영
+  U08H1QS9805: '712020:403a306e-0eff-4d57-9fda-2f517158d40f', // 조한빈
 };
 
 export const CHANNEL_IDS = [

@@ -81,3 +81,74 @@ export interface ParsedJiraTask {
   key: string;
   status: string;
 }
+
+// 싱크 맞추기 기능을 위한 추가 타입들
+export interface JiraIssueDetail {
+  id: string;
+  key: string;
+  fields: {
+    summary: string;
+    description?: string;
+    timeestimate?: number;
+    timeoriginalestimate?: number;
+    timetracking?: {
+      originalEstimate?: string;
+      remainingEstimate?: string;
+      originalEstimateSeconds?: number;
+      remainingEstimateSeconds?: number;
+    };
+    duedate?: string;
+    customfield_10015?: any;
+    assignee?: {
+      accountId?: string;
+      emailAddress?: string;
+      displayName?: string;
+    } | null;
+    status: { name: string };
+    issuelinks?: JiraIssueLink[];
+    _links?: { webui?: string };
+  };
+}
+
+export interface JiraIssueLink {
+  id: string;
+  type: {
+    id: string;
+    name: string;
+    inward: string;
+    outward: string;
+  };
+  outwardIssue?: {
+    id: string;
+    key: string;
+    fields: {
+      summary: string;
+      status: { name: string };
+    };
+  };
+  inwardIssue?: {
+    id: string;
+    key: string;
+    fields: {
+      summary: string;
+      status: { name: string };
+    };
+  };
+}
+
+export interface JiraIssueUpdatePayload {
+  fields: {
+    summary?: string;
+    duedate?: string;
+    customfield_10015?: any;
+    assignee?: {
+      accountId?: string;
+      emailAddress?: string;
+      displayName?: string;
+    } | null;
+    timetracking?: {
+      originalEstimate?: string;
+      remainingEstimate?: string;
+    };
+  };
+}

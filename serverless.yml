@@ -12,10 +12,13 @@ provider:
     SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     GITHUB_TOKEN: ${env:GITHUB_TOKEN}
+    ATLASSIAN_TOKEN: ${env:ATLASSIAN_TOKEN}
 
 functions:
   slack:
     handler: app.handler
+    timeout: 30
+    memorySize: 1024
     events:
       - http:
           path: slack/events
