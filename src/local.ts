@@ -12,7 +12,11 @@ import {
   handleSelectSlackTemplate,
 } from './handler/slackTemplate';
 import { handleGetSsmCommand } from './handler/ssmCommand';
-import { handleSyncIssues } from './handler/syncIssues';
+import {
+  handleSyncIssues,
+  handleSyncIssuesFehgToHb,
+  handleSyncIssuesFehgToKq,
+} from './handler/syncIssues';
 
 dotenv.config();
 
@@ -73,9 +77,15 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond }) => {
           },
           {
             type: 'button',
-            text: { type: 'plain_text', text: '🔄 싱크 맞추기' },
-            value: 'sync_issues',
-            action_id: 'sync_issues',
+            text: { type: 'plain_text', text: '🔄 FEHG→HB 싱크' },
+            value: 'sync_fehg_to_hb',
+            action_id: 'sync_fehg_to_hb',
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '🔄 FEHG→KQ 싱크' },
+            value: 'sync_fehg_to_kq',
+            action_id: 'sync_fehg_to_kq',
           },
         ],
       },
@@ -154,8 +164,10 @@ app.action('weekly_page', handleGetWeeklyPage);
 // 오늘 내 할일 액션
 app.action('my_jira_issues', handleMyJiraIssues);
 
-// 싱크 맞추기 액션
-app.action('sync_issues', handleSyncIssues);
+// 싱크 맞추기 액션들
+app.action('sync_issues', handleSyncIssues); // 기존 호환성 유지
+app.action('sync_fehg_to_hb', handleSyncIssuesFehgToHb);
+app.action('sync_fehg_to_kq', handleSyncIssuesFehgToKq);
 
 // Session Manager Command 액션
 app.action('ssm_command', handleGetSsmCommand);

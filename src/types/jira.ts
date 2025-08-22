@@ -99,6 +99,11 @@ export interface JiraIssueDetail {
     };
     duedate?: string;
     customfield_10015?: any;
+    customfield_10020?:
+      | string
+      | number
+      | { name?: string; value?: string; [key: string]: any }
+      | Array<{ name?: string; value?: string; [key: string]: any }>; // sprint 필드 (다양한 구조 지원)
     assignee?: {
       accountId?: string;
       emailAddress?: string;
@@ -141,6 +146,7 @@ export interface JiraIssueUpdatePayload {
     summary?: string;
     duedate?: string;
     customfield_10015?: any;
+    customfield_10020?: string | number; // sprint 필드 (ID 또는 이름)
     assignee?: {
       accountId?: string;
       emailAddress?: string;
