@@ -18,6 +18,14 @@ import {
   handleSyncIssuesFehgToHb,
   handleSyncIssuesFehgToKq,
 } from './handler/syncIssues';
+import {
+  handleFEHGToGWSync,
+  handleShowEpicList,
+  handleCreateAllTickets,
+  handleShowMappingStatus,
+  handleSyncTicketStatus,
+  handleTestEpicCreation,
+} from './handler/fehgToGwSync';
 
 dotenv.config();
 
@@ -83,6 +91,13 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond }) => {
             text: { type: 'plain_text', text: '🔄 FEHG→KQ 싱크' },
             value: 'sync_fehg_to_kq',
             action_id: 'sync_fehg_to_kq',
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '🌉 FEHG→GW 연동' },
+            value: 'fehg_gw_sync_main',
+            action_id: 'fehg_gw_sync_main',
+            style: 'primary',
           },
         ],
       },
@@ -168,6 +183,14 @@ app.action('sync_fehg_to_kq', handleSyncIssuesFehgToKq);
 
 // Session Manager Command 액션
 app.action('ssm_command', handleGetSsmCommand);
+
+// FEHG → GW 연동 액션들
+app.action('fehg_gw_sync_main', handleFEHGToGWSync);
+app.action('show_epic_list', handleShowEpicList);
+app.action('create_all_tickets', handleCreateAllTickets);
+app.action('show_mapping_status', handleShowMappingStatus);
+app.action('sync_ticket_status', handleSyncTicketStatus);
+app.action('test_epic_creation', handleTestEpicCreation);
 
 // Handle the Lambda function event
 export const handler = async (event: any, context: any, callback: any) => {

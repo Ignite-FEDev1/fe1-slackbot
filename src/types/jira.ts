@@ -158,3 +158,60 @@ export interface JiraIssueUpdatePayload {
     };
   };
 }
+
+// GW Jira 관련 타입 정의
+export interface GWJiraIssue {
+  id: string;
+  key: string;
+  fields: {
+    summary: string;
+    description?: string;
+    status: { name: string };
+    issuetype: { name: string };
+    project: { key: string };
+    created: string;
+    updated: string;
+    assignee?: {
+      accountId?: string;
+      emailAddress?: string;
+      displayName?: string;
+    } | null;
+  };
+}
+
+export interface GWJiraCreatePayload {
+  fields: {
+    project: { key: string };
+    issuetype: { name: string };
+    summary: string;
+    description?: string;
+    assignee?: { accountId?: string } | null;
+    duedate?: string; // 마감일
+    customfield_10306?: string; // HMG Jira 링크 필드
+    customfield_11209?: any; // AUTOWAY의 커스텀 필드 (FEHG의 customfield_10015와 매핑)
+    [key: string]: any; // 추가적인 커스텀 필드들을 위한 인덱스 시그니처
+  };
+}
+
+export interface GWJiraUpdatePayload {
+  fields: {
+    summary?: string;
+    description?: string;
+    customfield_10306?: string; // HMG Jira 링크 필드
+  };
+}
+
+// FEHG Epic 관련 타입
+export interface FEHGEpicIssue extends JiraIssueDetail {
+  fields: JiraIssueDetail['fields'] & {
+    parent?: {
+      id: string;
+      key: string;
+      fields: {
+        summary: string;
+      };
+    };
+    duedate?: string; // Epic의 마감일
+    customfield_10015?: any; // FEHG의 커스텀 필드
+  };
+}

@@ -9,6 +9,7 @@ FE1 팀을 위한 업무 자동화 Slack 봇입니다. 지라 이슈 관리, 데
 - **슬랙 템플릿**: CPO BO/소프티어 배포 템플릿 자동 생성
 - **지라 이슈 관리**: 내 담당 이슈 조회 및 상태 동기화
 - **이슈 싱크**: 블록된 이슈들의 상태 자동 동기화
+- **🌉 FEHG → GW 연동**: FEHG 에픽 하위 티켓을 GW Jira에 자동 생성 및 동기화
 
 ### 📅 데일리/위클리 관리
 
@@ -51,6 +52,7 @@ SLACK_BOT_TOKEN=your_slack_bot_token
 # 외부 서비스 토큰
 GITHUB_TOKEN=your_github_token
 ATLASSIAN_TOKEN=your_atlassian_token
+GW_JIRA_TOKEN=your_gw_jira_token
 ```
 
 ### 3. 로컬 개발
@@ -120,6 +122,15 @@ sls deploy
 1. 메인 메뉴에서 "🔄 싱크 맞추기" 선택
 2. 블록된 이슈들의 상태를 자동으로 동기화
 
+#### 🌉 FEHG → GW 연동
+
+1. 메인 메뉴에서 "🌉 FEHG→GW 연동" 선택
+2. 다음 기능들을 사용할 수 있습니다:
+   - **📋 에픽 목록 확인**: 대상 FEHG 에픽 목록 조회
+   - **🚀 티켓 생성**: 전체 에픽의 하위 티켓들을 GW Jira에 자동 생성
+   - **🔄 상태 동기화**: FEHG와 GW 티켓 간 상태 동기화
+   - **📊 매핑 현황 확인**: 생성된 티켓 매핑 현황 조회
+
 #### 📅 데일리/위클리
 
 1. 메인 메뉴에서 "📅 데일리" 또는 "📆 위클리" 선택
@@ -140,6 +151,7 @@ src/
 │   ├── dailyPage.ts   # 데일리/위클리 페이지 관리
 │   ├── slackTemplate.ts # 슬랙 템플릿 관리
 │   ├── syncIssues.ts  # 지라 이슈 동기화
+│   ├── fehgToGwSync.ts # FEHG → GW 연동 기능
 │   ├── ssmCommand.ts  # SSM 명령어 실행
 │   ├── eksCommand.ts  # EKS 명령어 실행
 │   └── ...

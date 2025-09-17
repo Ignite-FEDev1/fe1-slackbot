@@ -7,6 +7,70 @@ export const JIRA_BOARD_IDS = {
   KQ: 20,
 };
 
+// GW (외주사) Jira 설정
+export const GW_JIRA_CONFIG = {
+  BASE_URL: 'https://jira.hmg-corp.io',
+  PROJECT_KEY: 'AUTOWAY',
+  TOKEN: process.env.GW_JIRA_TOKEN || '', // 환경변수로 이동
+} as const;
+
+// FEHG 대상 에픽 목록
+export const FEHG_TARGET_EPICS = [
+  1519, 1637, 1617, 1618, 1619, 1620, 1621, 1622, 1623, 1624, 
+  1625, 1626, 1627, 1628, 1629, 1630, 1631, 1632, 1633, 1634, 
+  1635, 1640, 1748
+] as const;
+
+// FEHG ↔ GW 필드 매핑 설정
+export const FEHG_TO_GW_FIELD_MAPPING = {
+  // 기본 필드
+  summary: 'summary',
+  description: 'description',
+  
+  // 커스텀 필드 - FEHG에서 GW 티켓 정보 저장
+  fehg_to_gw_link: 'customfield_10306', // FEHG에서 GW 티켓 URL 저장
+  
+  // GW에서 FEHG 티켓 정보 저장 (추후 GW 커스텀 필드 ID로 교체)
+  gw_to_fehg_link: 'description', // 임시로 description에 FEHG 링크 정보 추가
+} as const;
+
+// Epic 전용 필드 매핑
+export const EPIC_FIELD_MAPPING = {
+  // 기본 필드 (FEHG → AUTOWAY)
+  summary: 'summary',
+  duedate: 'duedate',
+  
+  // 커스텀 필드 매핑 (FEHG → AUTOWAY)
+  customfield_10015: 'customfield_11209', // FEHG의 customfield_10015 → AUTOWAY의 customfield_11209
+} as const;
+
+// FEHG 티켓에 AUTOWAY 링크를 저장할 필드
+export const FEHG_LINK_FIELD = 'customfield_10306'; // FEHG 티켓의 HMG Jira 링크 필드
+
+// Task 전용 필드 매핑 (추후 확장용)
+export const TASK_FIELD_MAPPING = {
+  // 기본 필드
+  summary: 'summary',
+  description: 'description',
+  
+  // 연결 필드
+  fehg_link: 'customfield_10306', // HMG Jira 링크 필드
+} as const;
+
+// 티켓 매핑 테이블 구조 (로컬 저장용)
+export interface TicketMapping {
+  id: string;
+  fehg_ticket_key: string;
+  fehg_ticket_id: string;
+  fehg_epic_id: string;
+  gw_ticket_key: string;
+  gw_ticket_id: string;
+  created_at: string;
+  last_synced_at: string;
+  sync_status: 'active' | 'paused' | 'error' | 'completed';
+  error_message?: string;
+}
+
 export const USER_GROUP_IDS = [
   { name: 'fe1', id: 'S06J9P5HQ2U' },
   { name: 'fe-hmgdev', id: 'S067AHD9MFZ' },
@@ -67,7 +131,7 @@ export const SYNC_FIELD_CONFIG = {
     fields: [
       'summary',
       'duedate',
-      'customfield_10015',
+      'customfield_10015', // 시작일
       'assignee',
       'timetracking',
       'customfield_10020', // sprint 필드
