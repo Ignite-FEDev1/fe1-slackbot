@@ -13,7 +13,10 @@
     "dev:watch": "npm run build:local -- --watch & node --watch local.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev:node": "node --watch app.js",
-    "dev:esbuild": "npm run build -- --watch"
+    "dev:esbuild": "npm run build -- --watch",
+    "jira-sync": "node scripts/jira-sync.js",
+    "jira-sync:test": "node scripts/jira-sync.js test",
+    "jira-sync:list": "node scripts/jira-sync.js list"
   },
   "author": "",
   "license": "ISC",
