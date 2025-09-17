@@ -13,6 +13,7 @@ provider:
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     GITHUB_TOKEN: ${env:GITHUB_TOKEN}
     ATLASSIAN_TOKEN: ${env:ATLASSIAN_TOKEN}
+    GW_JIRA_TOKEN: ${env:GW_JIRA_TOKEN}
 
 functions:
   slack:

@@ -74,23 +74,25 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond }) => {
             value: 'slack_template',
             action_id: 'slack_template',
           },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '📌 내 지라 이슈 확인' },
-            value: 'my_jira_issues',
-            action_id: 'my_jira_issues',
-          },
+          // {
+          //   type: 'button',
+          //   text: { type: 'plain_text', text: '📌 내 지라 이슈 확인' },
+          //   value: 'my_jira_issues',
+          //   action_id: 'my_jira_issues',
+          // },
           {
             type: 'button',
             text: { type: 'plain_text', text: '🔄 FEHG→HB 싱크' },
             value: 'sync_fehg_to_hb',
             action_id: 'sync_fehg_to_hb',
+            style: 'primary',
           },
           {
             type: 'button',
             text: { type: 'plain_text', text: '🔄 FEHG→KQ 싱크' },
             value: 'sync_fehg_to_kq',
             action_id: 'sync_fehg_to_kq',
+            style: 'primary',
           },
           {
             type: 'button',
@@ -104,34 +106,34 @@ app.command('/bot-fe1-demo', async ({ command, ack, respond }) => {
 
       { type: 'divider' },
       // 데일리/위클리
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: '*📌 데일리/위클리*' },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '📅 데일리' },
-            value: 'daily_page',
-            action_id: 'daily_page',
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '📆 위클리' },
-            value: 'weekly_page',
-            action_id: 'weekly_page',
-          },
-          {
-            type: 'button',
-            text: { type: 'plain_text', text: '📝 데일리 페이지 만들기' },
-            value: 'create_daily_page',
-            action_id: 'create_daily_page',
-          },
-        ],
-      },
-      { type: 'divider' },
+      // {
+      //   type: 'section',
+      //   text: { type: 'mrkdwn', text: '*📌 데일리/위클리*' },
+      // },
+      // {
+      //   type: 'actions',
+      //   elements: [
+      //     {
+      //       type: 'button',
+      //       text: { type: 'plain_text', text: '📅 데일리' },
+      //       value: 'daily_page',
+      //       action_id: 'daily_page',
+      //     },
+      //     {
+      //       type: 'button',
+      //       text: { type: 'plain_text', text: '📆 위클리' },
+      //       value: 'weekly_page',
+      //       action_id: 'weekly_page',
+      //     },
+      //     {
+      //       type: 'button',
+      //       text: { type: 'plain_text', text: '📝 데일리 페이지 만들기' },
+      //       value: 'create_daily_page',
+      //       action_id: 'create_daily_page',
+      //     },
+      //   ],
+      // },
+      // { type: 'divider' },
 
       // 세 번째 버튼 그룹 (서버 관련)
       {
