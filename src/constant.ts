@@ -80,6 +80,7 @@ export const SYNC_FIELD_CONFIG = {
       'duedate',
       'customfield_10015',
       'assignee',
+      'timetracking',
       'customfield_10020', // sprint 필드 추가
     ] as const,
   },
