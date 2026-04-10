@@ -1,7 +1,6 @@
 import { App, BlockAction, MessageShortcut } from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
-import { SLACK_JIRA_USER_MAP } from '../constant';
-import { createFehgTask } from '../jira/createIssue';
+import { invokeWorker } from '../invokeWorker';
 import { getActiveEpics, JiraEpic } from '../jira/epics';
 import {
   summarizeThreadToTicket,
@@ -356,83 +355,23 @@ export const createTicketCommand: Command = {
         return;
       }
 
-      await ack();
+      await ack(); // 즉시 200 반환 → 팝업 닫힘
 
       const metadata: PrivateMetadata = view.private_metadata
         ? JSON.parse(view.private_metadata)
         : ({} as PrivateMetadata);
 
-      const assigneeAccountId =
-        SLACK_JIRA_USER_MAP[assigneeSlackId] || undefined;
-
-      const created = await createFehgTask({
-        summary: title,
+      // Jira 생성 + Slack 메시지를 비동기 Lambda worker에 위임
+      await invokeWorker({
+        type: 'create_ticket_work',
+        channel: metadata.channel,
+        threadTs: metadata.threadTs,
+        triggerUserId: metadata.triggerUserId,
+        title,
         description,
-        assigneeAccountId,
+        assigneeSlackId,
         epicKey,
       });
-
-      // 쓰레드에 결과 회신
-      if (metadata.channel && metadata.threadTs) {
-        if (created) {
-          const creatorMention = metadata.triggerUserId
-            ? `<@${metadata.triggerUserId}>`
-            : '누군가';
-          const assigneeMention = assigneeSlackId
-            ? `<@${assigneeSlackId}>`
-            : '미지정';
-          await client.chat.postMessage({
-            channel: metadata.channel,
-            thread_ts: metadata.threadTs,
-            text: `✅ FEHG 티켓 생성 완료: ${created.key} ${title} (${created.url}) · 생성자 ${creatorMention}`,
-            blocks: [
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `✅ *FEHG 티켓 생성 완료*\n<${created.url}|${created.key}> · ${title}`,
-                },
-                accessory: {
-                  type: 'button',
-                  text: {
-                    type: 'plain_text',
-                    text: '🔗 티켓 열기',
-                  },
-                  url: created.url,
-                  action_id: 'open_created_ticket',
-                },
-              },
-              {
-                type: 'context',
-                elements: [
-                  {
-                    type: 'mrkdwn',
-                    text: `🧑‍💻 생성자: ${creatorMention} · 👤 담당자: ${assigneeMention}`,
-                  },
-                ],
-              },
-            ],
-          });
-        } else {
-          await client.chat.postMessage({
-            channel: metadata.channel,
-            thread_ts: metadata.threadTs,
-            text: `❌ 티켓 생성에 실패했습니다. 로그를 확인해주세요.`,
-          });
-        }
-      }
-
-      // 담당자 매핑이 없으면 호출자에게 DM 으로 경고
-      if (!assigneeAccountId && metadata.triggerUserId) {
-        try {
-          await client.chat.postMessage({
-            channel: metadata.triggerUserId,
-            text: `⚠️ Slack user \`${assigneeSlackId}\` 의 Jira accountId 매핑이 \`SLACK_JIRA_USER_MAP\` 에 없어서 담당자 미할당 상태로 생성되었습니다.`,
-          });
-        } catch {
-          /* ignore */
-        }
-      }
     });
 
     // 4) 버튼 URL open_created_ticket — 응답용 더미 (URL 버튼은 ack 만 하면 됨)

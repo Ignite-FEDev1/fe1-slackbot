@@ -1,6 +1,6 @@
 import { App, BlockAction, MessageShortcut } from '@slack/bolt';
-import { SLACK_JIRA_USER_MAP } from '../constant';
-import { createFehgTask, CreatedIssue } from '../jira/createIssue';
+import { SLACK_JIRA_USER_MAP } from '../constant'; // getDefaultTeamSlackIds 에서 사용
+import { invokeWorker } from '../invokeWorker';
 import { getActiveEpics, JiraEpic } from '../jira/epics';
 import {
   BatchSummarizeContext,
@@ -422,90 +422,26 @@ export const batchTicketCommand: Command = {
         return;
       }
 
-      await ack();
+      await ack(); // 즉시 200 반환 → 팝업 닫힘
 
       const metadata: PrivateMetadata = view.private_metadata
         ? JSON.parse(view.private_metadata)
         : ({} as PrivateMetadata);
 
-      // 각 담당자마다 티켓 생성 (병렬 — ack 응답 3초 제한 대응)
-      const results: Array<{
-        slackUserId: string;
-        created: CreatedIssue | null;
-        missingMapping: boolean;
-      }> = await Promise.all(
-        selectedUsers.map(async (slackUserId) => {
-          const assigneeAccountId = SLACK_JIRA_USER_MAP[slackUserId];
-          if (!assigneeAccountId) {
-            return { slackUserId, created: null, missingMapping: true };
-          }
-          const created = await createFehgTask({
-            summary: title,
-            description,
-            assigneeAccountId,
-            epicKey,
-            startDate: startDate || undefined,
-            dueDate: endDate || undefined,
-            originalEstimate: estimate || undefined,
-          });
-          return { slackUserId, created, missingMapping: false };
-        })
-      );
-
-      // 결과 메시지 구성
-      if (metadata.channel && metadata.threadTs) {
-        const creatorMention = metadata.triggerUserId
-          ? `<@${metadata.triggerUserId}>`
-          : '누군가';
-
-        const successLines = results
-          .filter((r) => r.created)
-          .map(
-            (r) =>
-              `• <@${r.slackUserId}> → <${r.created!.url}|${r.created!.key}>`
-          );
-        const failureLines = results
-          .filter((r) => !r.created)
-          .map((r) =>
-            r.missingMapping
-              ? `• <@${r.slackUserId}> → ⚠️ Jira 매핑 없음 (SLACK_JIRA_USER_MAP 확인)`
-              : `• <@${r.slackUserId}> → ❌ 생성 실패`
-          );
-
-        const successCount = successLines.length;
-        const failCount = failureLines.length;
-
-        const summaryText = [
-          `*📦 배치 티켓 생성 결과*  ·  성공 ${successCount} / 실패 ${failCount}`,
-          `*제목*: ${title}`,
-          '',
-          successLines.length ? successLines.join('\n') : '_성공한 티켓 없음_',
-          failureLines.length ? '\n*⚠️ 실패*\n' + failureLines.join('\n') : '',
-        ]
-          .filter(Boolean)
-          .join('\n');
-
-        await client.chat.postMessage({
-          channel: metadata.channel,
-          thread_ts: metadata.threadTs,
-          text: `배치 티켓 생성 결과: 성공 ${successCount} / 실패 ${failCount} · 생성자 ${creatorMention}`,
-          blocks: [
-            {
-              type: 'section',
-              text: { type: 'mrkdwn', text: summaryText },
-            },
-            {
-              type: 'context',
-              elements: [
-                {
-                  type: 'mrkdwn',
-                  text: `🧑‍💻 생성자: ${creatorMention}`,
-                },
-              ],
-            },
-          ],
-        });
-      }
+      // Jira 생성 + Slack 메시지를 비동기 Lambda worker에 위임
+      await invokeWorker({
+        type: 'batch_ticket_work',
+        channel: metadata.channel,
+        threadTs: metadata.threadTs,
+        triggerUserId: metadata.triggerUserId,
+        title,
+        description,
+        selectedUsers,
+        epicKey,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        estimate: estimate || undefined,
+      });
     });
   },
 

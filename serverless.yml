@@ -14,6 +14,14 @@ provider:
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     ATLASSIAN_TOKEN: ${env:ATLASSIAN_TOKEN}
     GROQ_API_KEY: ${env:GROQ_API_KEY}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+          Resource:
+            - arn:aws:lambda:ap-northeast-2:*:function:fe1-slackbot-prod-slack
 
 functions:
   slack:
