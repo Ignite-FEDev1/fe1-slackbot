@@ -1,172 +1,87 @@
 # FE1 Slack Bot 🤖
 
-FE1 팀을 위한 업무 자동화 Slack 봇입니다. 지라 이슈 관리, 데일리/위클리 페이지 생성, 슬랙 템플릿 제공 등 다양한 업무를 자동화해드립니다.
+Slack 쓰레드에서 바로 FEHG Jira 티켓을 만들어주는 봇입니다. 쓰레드의 논의 내용을 LLM(Groq)이 요약해서 제목·본문 초안을 자동으로 채워줍니다.
 
-## 🚀 주요 기능
+## 🚀 기능
 
-### 📋 업무 자동화
+### Step 1 — 쓰레드 → 티켓 1개 생성 ✅
+- 쓰레드 메시지 우클릭 → **티켓 만들기** (Slack message shortcut)
+- 봇이 쓰레드 전체 대화를 읽음 → Groq 로 요약 → 모달에 초안 채움
+- 사용자는 모달에서 **제목 / 본문 / 담당자 / 에픽** 만 확인/수정하고 생성 버튼 클릭
+- 생성되면 쓰레드에 `✅ FEHG-1234` 링크가 자동으로 달림
+- 공수, 시작/종료일 등은 Jira 에서 직접 입력
 
-- **슬랙 템플릿**: CPO BO/소프티어 배포 템플릿 자동 생성
-- **지라 이슈 관리**: 내 담당 이슈 조회 및 상태 동기화
-- **이슈 싱크**: 블록된 이슈들의 상태 자동 동기화
-- **🌉 FEHG → GW 연동**: FEHG 에픽 하위 티켓을 GW Jira에 자동 생성 및 동기화
+### Step 2 이후 (예정)
+- 동시에 여러 명을 대상으로 같은 티켓 배치 생성 (배포 모니터링 등)
+- `/fe1 <기능>` 으로 확장
 
-### 📅 데일리/위클리 관리
+## 🏗️ 구조
 
-- **데일리 페이지**: 오늘의 작업 내용 자동 생성
-- **위클리 페이지**: 주간 작업 요약 생성
-- **페이지 목록**: 최신 데일리/위클리 페이지 조회
+```
+src/
+├── index.ts            # Lambda 엔트리 (AwsLambdaReceiver)
+├── local.ts            # 로컬 개발용 Express 서버
+├── register.ts         # /fe1 슬래시 라우터 + commands 등록
+├── constant.ts         # JIRA 설정, SLACK_JIRA_USER_MAP
+├── commands/           # 🧩 기능 모듈 (1 feature = 1 file)
+│   ├── types.ts        # Command 인터페이스
+│   ├── index.ts        # Command 레지스트리
+│   ├── createTicket.ts # Step 1 기능
+│   └── help.ts         # /fe1 help
+├── llm/
+│   └── groq.ts         # Groq API 호출 + 프롬프트
+├── jira/
+│   ├── client.ts       # Jira REST v3 axios 인스턴스
+│   ├── epics.ts        # 에픽 목록 조회
+│   └── createIssue.ts  # Task 생성 + ADF 변환
+└── slack/
+    └── thread.ts       # 쓰레드 메시지 fetch + 사용자 이름 치환
+```
 
-### 🔧 시스템 관리
+### 새 기능 추가하는 법
+1. `src/commands/<feature>.ts` 생성, `Command` 인터페이스 구현
+2. `src/commands/index.ts` 의 `commands` 배열에 한 줄 추가
+3. 끝
 
-- **SSM 명령어**: AWS SSM 명령어 실행
-- **EKS 명령어**: Kubernetes 클러스터 관리
-- **PR 리뷰**: GitHub PR 리뷰 상태 확인
+## ⚙️ 환경 변수
 
-## 🛠️ 기술 스택
+```bash
+SLACK_SIGNING_SECRET=xxx
+SLACK_BOT_TOKEN=xoxb-xxx
+ATLASSIAN_TOKEN=xxx          # Jira API 토큰
+GROQ_API_KEY=gsk_xxx         # https://console.groq.com/keys
+```
 
-- **Runtime**: Node.js 20.x
-- **Framework**: Serverless Framework
-- **Slack SDK**: @slack/bolt
-- **Build Tool**: esbuild
-- **Language**: TypeScript
-- **Cloud**: AWS Lambda
+## 🛠️ Slack 앱 설정
 
-## 📦 설치 및 설정
+### Slash Commands
+- `/fe1` — Request URL 을 배포된 Lambda 엔드포인트로 설정
 
-### 1. 의존성 설치
+### Interactivity & Shortcuts → Shortcuts → On messages
+- Name: `티켓 만들기`
+- Callback ID: `create_ticket_from_thread` ← **코드와 일치해야 함**
+
+### OAuth Bot Token Scopes
+- `commands`
+- `chat:write`
+- `channels:history`, `groups:history`, `im:history`
+- `users:read`
+
+## 🧑‍💻 로컬 개발
 
 ```bash
 npm install
-```
-
-### 2. 환경 변수 설정
-
-다음 환경 변수들을 설정해주세요:
-
-```bash
-# Slack 설정
-SLACK_SIGNING_SECRET=your_slack_signing_secret
-SLACK_BOT_TOKEN=your_slack_bot_token
-
-# 외부 서비스 토큰
-GITHUB_TOKEN=your_github_token
-ATLASSIAN_TOKEN=your_atlassian_token
-GW_JIRA_TOKEN=your_gw_jira_token
-```
-
-### 3. 로컬 개발
-
-```bash
-# 로컬 개발 서버 실행
-npm run dev
-
-# 파일 변경 감지 모드
-npm run dev:watch
+npm run dev        # localhost:3086 에서 실행
+# ngrok 등으로 외부 노출 후 Slack 앱 Request URL 연결
 ```
 
 ## 🚀 배포
 
-### 1. 빌드
-
 ```bash
-npm run build
-```
-
-### 2. 배포
-
-```bash
-# 일반 배포
-sls deploy
-
-# 또는 npm 스크립트 사용 (TLS 이슈 자동 처리)
 npm run deploy
+# = npm run build && sls deploy
 ```
 
-### 3. VPN/TLS 이슈 해결
+## 📝 Slack ↔ Jira 사용자 매핑
 
-VPN 연결 시 TLS 인증서 문제가 발생하는 경우:
-
-```bash
-export NODE_TLS_REJECT_UNAUTHORIZED=0
-sls deploy
-```
-
-⚠️ **주의**: 보안상 해당 터미널에서는 다른 작업을 피해주세요.
-
-## 📝 사용법
-
-### Slack 명령어
-
-- `/bot-fe1-demo`: 봇 메인 메뉴 실행
-
-### 주요 기능별 사용법
-
-#### 📄 슬랙 템플릿
-
-1. 메인 메뉴에서 "📄 슬랙 템플릿" 선택
-2. 원하는 템플릿 유형 선택:
-   - CPO BO 정기배포/핫픽스
-   - 소프티어 정기배포/핫픽스
-
-#### 📌 지라 이슈 관리
-
-1. 메인 메뉴에서 "📌 내 지라 이슈 확인" 선택
-2. 다음 정보 확인:
-   - 오늘 작업한 이슈
-   - 시작하지 않은 이슈
-   - 완료하지 않은 이슈
-
-#### 🔄 이슈 싱크
-
-1. 메인 메뉴에서 "🔄 싱크 맞추기" 선택
-2. 블록된 이슈들의 상태를 자동으로 동기화
-
-#### 🌉 FEHG → GW 연동
-
-1. 메인 메뉴에서 "🌉 FEHG→GW 연동" 선택
-2. 다음 기능들을 사용할 수 있습니다:
-   - **📋 에픽 목록 확인**: 대상 FEHG 에픽 목록 조회
-   - **🚀 티켓 생성**: 전체 에픽의 하위 티켓들을 GW Jira에 자동 생성
-   - **🔄 상태 동기화**: FEHG와 GW 티켓 간 상태 동기화
-   - **📊 매핑 현황 확인**: 생성된 티켓 매핑 현황 조회
-
-#### 📅 데일리/위클리
-
-1. 메인 메뉴에서 "📅 데일리" 또는 "📆 위클리" 선택
-2. 페이지 생성 또는 목록 조회
-
-## 🔍 로그 확인
-
-```bash
-# 실시간 로그 확인
-sls logs -f slack -t
-```
-
-## 📁 프로젝트 구조
-
-```
-src/
-├── handler/           # 기능별 핸들러
-│   ├── dailyPage.ts   # 데일리/위클리 페이지 관리
-│   ├── slackTemplate.ts # 슬랙 템플릿 관리
-│   ├── syncIssues.ts  # 지라 이슈 동기화
-│   ├── fehgToGwSync.ts # FEHG → GW 연동 기능
-│   ├── ssmCommand.ts  # SSM 명령어 실행
-│   ├── eksCommand.ts  # EKS 명령어 실행
-│   └── ...
-├── external.ts        # 외부 API 연동
-├── constant.ts        # 상수 정의
-├── types/            # TypeScript 타입 정의
-└── util.ts           # 유틸리티 함수
-```
-
-## 🤝 기여하기
-
-1. `src/` 하위 폴더에서 작업
-2. `npm run build`로 빌드
-3. `sls deploy`로 배포
-
-## 📞 지원
-
-문제가 발생하거나 개선 사항이 있으시면 팀에 문의해주세요.
+`src/constant.ts` 의 `SLACK_JIRA_USER_MAP` 에서 관리. 매핑이 없는 사용자에게 할당 시 봇이 DM 으로 경고를 보냅니다.

@@ -1,5 +1,6 @@
 service: fe1-slackbot
-frameworkVersion: '4'
+frameworkVersion: '3'
+useDotenv: true
 
 provider:
   name: aws
@@ -11,9 +12,8 @@ provider:
   environment:
     SLACK_SIGNING_SECRET: ${env:SLACK_SIGNING_SECRET}
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
-    GITHUB_TOKEN: ${env:GITHUB_TOKEN}
     ATLASSIAN_TOKEN: ${env:ATLASSIAN_TOKEN}
-    GW_JIRA_TOKEN: ${env:GW_JIRA_TOKEN}
+    GROQ_API_KEY: ${env:GROQ_API_KEY}
 
 functions:
   slack:

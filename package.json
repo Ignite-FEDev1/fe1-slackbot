@@ -5,18 +5,13 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "deploy": "npm run build && export NODE_TLS_REJECT_UNAUTHORIZED=0 sls deploy",
+    "deploy": "npm run build && NODE_TLS_REJECT_UNAUTHORIZED=0 sls deploy",
     "offline": "npm run build && serverless offline",
     "build": "esbuild src/index.ts --bundle --platform=node --outfile=app.js --format=cjs",
     "build:local": "esbuild src/local.ts --bundle --platform=node --outfile=local.js --format=cjs",
     "dev": "npm run build:local && node local.js",
     "dev:watch": "npm run build:local -- --watch & node --watch local.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev:node": "node --watch app.js",
-    "dev:esbuild": "npm run build -- --watch",
-    "jira-sync": "node scripts/jira-sync.js",
-    "jira-sync:test": "node scripts/jira-sync.js test",
-    "jira-sync:list": "node scripts/jira-sync.js list"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
@@ -28,6 +23,7 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@aws-sdk/client-lambda": "^3.1028.0",
     "@slack/bolt": "^3.19.0",
     "@types/axios": "^0.14.0",
     "axios": "^1.7.2",
