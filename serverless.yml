@@ -14,6 +14,8 @@ provider:
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     ATLASSIAN_TOKEN: ${env:ATLASSIAN_TOKEN}
     GROQ_API_KEY: ${env:GROQ_API_KEY}
+    NEXT_PUBLIC_DB_URL: ${env:NEXT_PUBLIC_DB_URL}
+    DB_SERVICE_ROLE_KEY: ${env:DB_SERVICE_ROLE_KEY}
   iam:
     role:
       statements:

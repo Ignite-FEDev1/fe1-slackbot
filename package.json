@@ -25,6 +25,7 @@
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1028.0",
     "@slack/bolt": "^3.19.0",
+    "@supabase/supabase-js": "^2.103.0",
     "@types/axios": "^0.14.0",
     "axios": "^1.7.2",
     "date-fns": "^4.1.0",

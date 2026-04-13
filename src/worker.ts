@@ -1,5 +1,6 @@
 import { WebClient } from '@slack/web-api';
 import { SLACK_JIRA_USER_MAP } from './constant';
+import { getJiraCredsByAccountId } from './db';
 import { createFehgTask, CreatedIssue } from './jira/createIssue';
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
@@ -13,6 +14,9 @@ export interface CreateTicketWorkerPayload {
   description: string;
   assigneeSlackId: string;
   epicKey: string;
+  startDate?: string;
+  endDate?: string;
+  estimate?: string;
 }
 
 export interface BatchTicketWorkerPayload {
@@ -42,11 +46,31 @@ export const handleWorker = async (payload: WorkerPayload): Promise<void> => {
 const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
   const assigneeAccountId = SLACK_JIRA_USER_MAP[p.assigneeSlackId] || undefined;
 
+  // 담당자의 Jira 인증정보를 Supabase에서 조회 → 해당 인증으로 생성하면 보고자=담당자
+  let jiraAuth: { email: string; apiToken: string } | undefined;
+  if (assigneeAccountId) {
+    try {
+      const creds = await getJiraCredsByAccountId(assigneeAccountId);
+      if (creds?.igniteJiraEmail && creds?.igniteJiraApiToken) {
+        jiraAuth = {
+          email: creds.igniteJiraEmail,
+          apiToken: creds.igniteJiraApiToken,
+        };
+      }
+    } catch (e) {
+      console.error('[worker] Supabase 인증 조회 실패, 기본 인증으로 fallback:', e);
+    }
+  }
+
   const created = await createFehgTask({
     summary: p.title,
     description: p.description,
     assigneeAccountId,
     epicKey: p.epicKey,
+    startDate: p.startDate,
+    dueDate: p.endDate,
+    originalEstimate: p.estimate,
+    jiraAuth,
   });
 
   if (!p.channel || !p.threadTs) return;
@@ -54,6 +78,21 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
   if (created) {
     const creatorMention = p.triggerUserId ? `<@${p.triggerUserId}>` : '누군가';
     const assigneeMention = p.assigneeSlackId ? `<@${p.assigneeSlackId}>` : '미지정';
+
+    // 시작일/종료일/추정치 정보 조합
+    const detailParts: string[] = [];
+    if (p.startDate && p.endDate) {
+      detailParts.push(`📅 ${p.startDate} → ${p.endDate}`);
+    } else if (p.startDate) {
+      detailParts.push(`📅 시작: ${p.startDate}`);
+    } else if (p.endDate) {
+      detailParts.push(`📅 종료: ${p.endDate}`);
+    }
+    if (p.estimate) {
+      detailParts.push(`⏱ 추정: ${p.estimate}`);
+    }
+    const detailLine = detailParts.length ? `\n${detailParts.join('  ·  ')}` : '';
+
     await client.chat.postMessage({
       channel: p.channel,
       thread_ts: p.threadTs,
@@ -63,7 +102,7 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `✅ *FEHG 티켓 생성 완료*\n<${created.url}|${created.key}> · ${p.title}`,
+            text: `✅ *FEHG 티켓 생성 완료*\n<${created.url}|${created.key}> · ${p.title}${detailLine}`,
           },
           accessory: {
             type: 'button',
@@ -115,6 +154,21 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
       if (!assigneeAccountId) {
         return { slackUserId, created: null, missingMapping: true };
       }
+
+      // 담당자별 Jira 인증 조회
+      let jiraAuth: { email: string; apiToken: string } | undefined;
+      try {
+        const creds = await getJiraCredsByAccountId(assigneeAccountId);
+        if (creds?.igniteJiraEmail && creds?.igniteJiraApiToken) {
+          jiraAuth = {
+            email: creds.igniteJiraEmail,
+            apiToken: creds.igniteJiraApiToken,
+          };
+        }
+      } catch {
+        // fallback to default auth
+      }
+
       const created = await createFehgTask({
         summary: p.title,
         description: p.description,
@@ -123,6 +177,7 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
         startDate: p.startDate || undefined,
         dueDate: p.endDate || undefined,
         originalEstimate: p.estimate || undefined,
+        jiraAuth,
       });
       return { slackUserId, created, missingMapping: false };
     })
@@ -145,9 +200,24 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
   const successCount = successLines.length;
   const failCount = failureLines.length;
 
+  // 시작일/종료일/추정치 정보 조합
+  const batchDetailParts: string[] = [];
+  if (p.startDate && p.endDate) {
+    batchDetailParts.push(`📅 ${p.startDate} → ${p.endDate}`);
+  } else if (p.startDate) {
+    batchDetailParts.push(`📅 시작: ${p.startDate}`);
+  } else if (p.endDate) {
+    batchDetailParts.push(`📅 종료: ${p.endDate}`);
+  }
+  if (p.estimate) {
+    batchDetailParts.push(`⏱ 추정: ${p.estimate}`);
+  }
+  const batchDetailLine = batchDetailParts.length ? batchDetailParts.join('  ·  ') : '';
+
   const summaryText = [
     `*📦 배치 티켓 생성 결과*  ·  성공 ${successCount} / 실패 ${failCount}`,
     `*제목*: ${p.title}`,
+    batchDetailLine,
     '',
     successLines.length ? successLines.join('\n') : '_성공한 티켓 없음_',
     failureLines.length ? '\n*⚠️ 실패*\n' + failureLines.join('\n') : '',

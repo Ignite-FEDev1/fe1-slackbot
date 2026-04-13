@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { JIRA_CONFIG } from '../constant';
 import { buildIssueUrl, jiraClient } from './client';
 
@@ -12,6 +13,11 @@ export interface CreateTaskInput {
   dueDate?: string;
   /** Jira 포맷. fe1-web 의 패턴: /^(\d+\.?\d*)(d|m|w|h)$/i (예: 3d, 1w, 1.5h) */
   originalEstimate?: string;
+  /** 담당자의 Jira 인증정보. 제공되면 이 인증으로 API 호출 → 보고자=담당자 */
+  jiraAuth?: {
+    email: string;
+    apiToken: string;
+  };
 }
 
 export interface CreatedIssue {
@@ -72,8 +78,23 @@ export const createFehgTask = async (
     fields.timetracking = { originalEstimate: input.originalEstimate };
   }
 
+  // 담당자 인증정보가 제공되면 해당 인증으로 호출 (보고자=담당자)
+  const client = input.jiraAuth
+    ? axios.create({
+        baseURL: `${JIRA_CONFIG.BASE_URL}/rest/api/3`,
+        auth: {
+          username: input.jiraAuth.email,
+          password: input.jiraAuth.apiToken,
+        },
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+      })
+    : jiraClient;
+
   try {
-    const res = await jiraClient.post<{ key: string }>('/issue', { fields });
+    const res = await client.post<{ key: string }>('/issue', { fields });
     return {
       key: res.data.key,
       url: buildIssueUrl(res.data.key),

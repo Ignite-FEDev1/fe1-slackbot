@@ -14,6 +14,13 @@ const SHORTCUT_ID = 'create_ticket_from_thread';
 const VIEW_ID = 'create_ticket_modal';
 const REGENERATE_ACTION_ID = 'regenerate_summary';
 
+// 최초추정치 포맷 검증 (fe1-web 과 동일한 패턴)
+const ESTIMATE_PATTERN = /^(\d+\.?\d*)(d|m|w|h)$/i;
+const isValidEstimate = (v: string) => ESTIMATE_PATTERN.test(v.trim());
+
+// 날짜 검증 (YYYY-MM-DD)
+const isValidDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+
 interface PrivateMetadata {
   channel: string;
   threadTs: string;
@@ -47,6 +54,9 @@ interface BuildModalParams {
   assigneeUserId: string;
   instructions: string;
   selectedEpicKey?: string;
+  startDate?: string;
+  endDate?: string;
+  estimate?: string;
 }
 
 const buildModalView = ({
@@ -56,6 +66,9 @@ const buildModalView = ({
   assigneeUserId,
   instructions,
   selectedEpicKey,
+  startDate,
+  endDate,
+  estimate,
 }: BuildModalParams) => {
   const epicOptions = epics.slice(0, 100).map((e) => ({
     text: {
@@ -134,7 +147,53 @@ const buildModalView = ({
     });
   }
 
-  // 5. 추가 지시사항
+  // 5. 시작일 (선택)
+  blocks.push({
+    type: 'input',
+    block_id: 'start_date_block',
+    optional: true,
+    label: { type: 'plain_text', text: '시작일' },
+    element: {
+      type: 'datepicker',
+      action_id: 'start_date',
+      ...(startDate ? { initial_date: startDate } : {}),
+      placeholder: { type: 'plain_text', text: '시작일 선택' },
+    },
+  });
+
+  // 6. 종료일 (선택)
+  blocks.push({
+    type: 'input',
+    block_id: 'end_date_block',
+    optional: true,
+    label: { type: 'plain_text', text: '종료일' },
+    element: {
+      type: 'datepicker',
+      action_id: 'end_date',
+      ...(endDate ? { initial_date: endDate } : {}),
+      placeholder: { type: 'plain_text', text: '종료일 선택' },
+    },
+  });
+
+  // 7. 최초추정치 (선택)
+  blocks.push({
+    type: 'input',
+    block_id: 'estimate_block',
+    optional: true,
+    label: { type: 'plain_text', text: '최초추정치' },
+    hint: {
+      type: 'plain_text',
+      text: '형식: 숫자 + 단위 (d=일, w=주, h=시간, m=분) 예: 3d, 1w, 1.5h',
+    },
+    element: {
+      type: 'plain_text_input',
+      action_id: 'estimate',
+      initial_value: estimate ?? '',
+      placeholder: { type: 'plain_text', text: '예: 3d' },
+    },
+  });
+
+  // 8. 추가 지시사항
   blocks.push({
     type: 'input',
     block_id: 'instructions_block',
@@ -298,6 +357,12 @@ export const createTicketCommand: Command = {
           values.instructions_block?.instructions?.value?.trim() ?? '';
         const selectedEpicKey =
           values.epic_block?.epic?.selected_option?.value ?? undefined;
+        const startDate =
+          values.start_date_block?.start_date?.selected_date ?? undefined;
+        const endDate =
+          values.end_date_block?.end_date?.selected_date ?? undefined;
+        const estimate =
+          values.estimate_block?.estimate?.value?.trim() ?? '';
 
         const metadata: PrivateMetadata = view.private_metadata
           ? JSON.parse(view.private_metadata)
@@ -328,6 +393,9 @@ export const createTicketCommand: Command = {
               assigneeUserId,
               instructions,
               selectedEpicKey,
+              startDate,
+              endDate,
+              estimate,
             }),
           });
         } catch (e) {
@@ -346,10 +414,25 @@ export const createTicketCommand: Command = {
         values.assignee_block?.assignee?.selected_user ?? '';
       const epicKey =
         values.epic_block?.epic?.selected_option?.value ?? '';
+      const startDate =
+        values.start_date_block?.start_date?.selected_date ?? '';
+      const endDate =
+        values.end_date_block?.end_date?.selected_date ?? '';
+      const estimate =
+        values.estimate_block?.estimate?.value?.trim() ?? '';
 
       const errors: Record<string, string> = {};
       if (!title) errors.title_block = '제목을 입력해주세요.';
       if (!epicKey) errors.epic_block = '상위 에픽을 선택해주세요.';
+      if (estimate && !isValidEstimate(estimate))
+        errors.estimate_block =
+          '형식이 올바르지 않습니다. (예: 3d, 1w, 1.5h, 30m)';
+      if (startDate && !isValidDate(startDate))
+        errors.start_date_block = '시작일 포맷이 올바르지 않습니다.';
+      if (endDate && !isValidDate(endDate))
+        errors.end_date_block = '종료일 포맷이 올바르지 않습니다.';
+      if (startDate && endDate && startDate > endDate)
+        errors.end_date_block = '종료일은 시작일 이후여야 합니다.';
       if (Object.keys(errors).length > 0) {
         await ack({ response_action: 'errors', errors });
         return;
@@ -371,6 +454,9 @@ export const createTicketCommand: Command = {
         description,
         assigneeSlackId,
         epicKey,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        estimate: estimate || undefined,
       });
     });
 
