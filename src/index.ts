@@ -18,7 +18,7 @@ registerApp(app);
 
 export const handler = async (event: any, context: any, callback: any) => {
   // 비동기 worker 호출 (InvocationType: 'Event') 처리
-  if (event?.type && (event.type === 'create_ticket_work' || event.type === 'batch_ticket_work')) {
+  if (event?.type && (event.type === 'create_ticket_work' || event.type === 'batch_ticket_work' || event.type === 'regenerate_summary_work')) {
     await handleWorker(event as WorkerPayload);
     return { statusCode: 200 };
   }

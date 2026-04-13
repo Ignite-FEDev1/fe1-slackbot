@@ -340,7 +340,7 @@ export const createTicketCommand: Command = {
       }
     });
 
-    // 2) 🔄 재요약 버튼 핸들러
+    // 2) 🔄 재요약 버튼 핸들러 — ack 후 worker에 위임 (3초 타임아웃 방지)
     app.action(
       REGENERATE_ACTION_ID,
       async ({ ack, body, client }) => {
@@ -368,39 +368,45 @@ export const createTicketCommand: Command = {
           ? JSON.parse(view.private_metadata)
           : ({} as PrivateMetadata);
 
-        // 로딩 힌트를 위해 현재 블록을 그대로 두고 context 만 살짝 업데이트하면 좋겠지만,
-        // Slack modal update 는 전체 교체이므로 그냥 즉시 재요약 후 교체.
+        // 로딩 표시로 모달 즉시 업데이트
         try {
-          const [messages, epics, assigneeName] = await Promise.all([
-            fetchThreadMessages(client, metadata.channel, metadata.threadTs),
-            getActiveEpics(),
-            getSlackDisplayName(client, assigneeUserId),
-          ]);
-
-          const ctx: SummarizeContext = {
-            assigneeName,
-            instructions: instructions || undefined,
-          };
-          const draft = await summarizeThreadToTicket(messages, ctx);
-
           await client.views.update({
             view_id: view.id,
-            hash: view.hash,
-            view: buildModalView({
-              metadata,
-              epics,
-              draft,
-              assigneeUserId,
-              instructions,
-              selectedEpicKey,
-              startDate,
-              endDate,
-              estimate,
-            }),
+            view: {
+              type: 'modal',
+              callback_id: VIEW_ID + '_loading',
+              private_metadata: view.private_metadata || '',
+              title: { type: 'plain_text', text: 'FEHG 티켓 만들기' },
+              close: { type: 'plain_text', text: '닫기' },
+              blocks: [
+                {
+                  type: 'section',
+                  text: {
+                    type: 'mrkdwn',
+                    text: '⏳ 담당자/지시사항을 반영해 다시 요약 중입니다...',
+                  },
+                },
+              ],
+            },
           });
         } catch (e) {
-          console.error('[createTicket] 재요약 실패:', e);
+          console.error('[createTicket] 로딩 모달 업데이트 실패:', e);
         }
+
+        // worker에 재요약 위임
+        await invokeWorker({
+          type: 'regenerate_summary_work',
+          viewId: view.id,
+          channel: metadata.channel,
+          threadTs: metadata.threadTs,
+          triggerUserId: metadata.triggerUserId,
+          assigneeUserId,
+          instructions,
+          selectedEpicKey,
+          startDate,
+          endDate,
+          estimate,
+        });
       }
     );
 

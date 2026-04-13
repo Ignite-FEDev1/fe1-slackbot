@@ -2,6 +2,9 @@ import { WebClient } from '@slack/web-api';
 import { SLACK_JIRA_USER_MAP } from './constant';
 import { getJiraCredsByAccountId } from './db';
 import { createFehgTask, CreatedIssue } from './jira/createIssue';
+import { getActiveEpics } from './jira/epics';
+import { summarizeThreadToTicket, SummarizeContext } from './llm/groq';
+import { fetchThreadMessages } from './slack/thread';
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -42,13 +45,32 @@ export interface BatchTicketWorkerPayload {
   estimate?: string;
 }
 
-export type WorkerPayload = CreateTicketWorkerPayload | BatchTicketWorkerPayload;
+export interface RegenerateWorkerPayload {
+  type: 'regenerate_summary_work';
+  viewId: string;
+  channel: string;
+  threadTs: string;
+  triggerUserId: string;
+  assigneeUserId: string;
+  instructions: string;
+  selectedEpicKey?: string;
+  startDate?: string;
+  endDate?: string;
+  estimate?: string;
+}
+
+export type WorkerPayload =
+  | CreateTicketWorkerPayload
+  | BatchTicketWorkerPayload
+  | RegenerateWorkerPayload;
 
 export const handleWorker = async (payload: WorkerPayload): Promise<void> => {
   if (payload.type === 'create_ticket_work') {
     await handleCreateTicketWork(payload);
   } else if (payload.type === 'batch_ticket_work') {
     await handleBatchTicketWork(payload);
+  } else if (payload.type === 'regenerate_summary_work') {
+    await handleRegenerateSummary(payload);
   }
 };
 
@@ -257,4 +279,130 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
       },
     ],
   });
+};
+
+/**
+ * 재요약 worker: LLM 호출 → 모달 업데이트
+ */
+const handleRegenerateSummary = async (p: RegenerateWorkerPayload) => {
+  try {
+    // 담당자 이름 조회
+    let assigneeName = p.assigneeUserId;
+    try {
+      const info = await client.users.info({ user: p.assigneeUserId });
+      assigneeName =
+        info.user?.profile?.display_name ||
+        info.user?.real_name ||
+        p.assigneeUserId;
+    } catch { /* fallback to userId */ }
+
+    const [messages, epics] = await Promise.all([
+      fetchThreadMessages(client, p.channel, p.threadTs),
+      getActiveEpics(),
+    ]);
+
+    const ctx: SummarizeContext = {
+      assigneeName,
+      instructions: p.instructions || undefined,
+    };
+    const draft = await summarizeThreadToTicket(messages, ctx);
+
+    const epicOptions = epics.slice(0, 100).map((e) => ({
+      text: { type: 'plain_text' as const, text: `${e.key} ${e.summary}`.slice(0, 75) },
+      value: e.key,
+    }));
+    const initialEpic =
+      p.selectedEpicKey && epicOptions.find((o) => o.value === p.selectedEpicKey)
+        ? epicOptions.find((o) => o.value === p.selectedEpicKey)!
+        : undefined;
+
+    const metadata = { channel: p.channel, threadTs: p.threadTs, triggerUserId: p.triggerUserId };
+    const blocks: any[] = [];
+
+    // 1. 담당자
+    blocks.push({
+      type: 'input', block_id: 'assignee_block',
+      label: { type: 'plain_text', text: '담당자' },
+      element: { type: 'users_select', action_id: 'assignee', initial_user: p.assigneeUserId },
+    });
+    // 2. 제목
+    blocks.push({
+      type: 'input', block_id: 'title_block',
+      label: { type: 'plain_text', text: '제목' },
+      element: { type: 'plain_text_input', action_id: 'title', initial_value: draft?.title ?? '', max_length: 250 },
+    });
+    // 3. 본문
+    blocks.push({
+      type: 'input', block_id: 'description_block',
+      label: { type: 'plain_text', text: '본문' },
+      element: { type: 'plain_text_input', action_id: 'description', multiline: true, initial_value: draft?.description ?? '' },
+    });
+    // 4. 에픽
+    if (epicOptions.length > 0) {
+      blocks.push({
+        type: 'input', block_id: 'epic_block',
+        label: { type: 'plain_text', text: '상위 에픽' },
+        element: {
+          type: 'static_select', action_id: 'epic',
+          placeholder: { type: 'plain_text', text: '에픽 선택' },
+          options: epicOptions,
+          ...(initialEpic ? { initial_option: initialEpic } : {}),
+        },
+      });
+    } else {
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '⚠️ _진행중인 FEHG 에픽을 찾지 못했습니다._' } });
+    }
+    // 5. 시작일
+    blocks.push({
+      type: 'input', block_id: 'start_date_block', optional: true,
+      label: { type: 'plain_text', text: '시작일' },
+      element: { type: 'datepicker', action_id: 'start_date', ...(p.startDate ? { initial_date: p.startDate } : {}), placeholder: { type: 'plain_text', text: '시작일 선택' } },
+    });
+    // 6. 종료일
+    blocks.push({
+      type: 'input', block_id: 'end_date_block', optional: true,
+      label: { type: 'plain_text', text: '종료일' },
+      element: { type: 'datepicker', action_id: 'end_date', ...(p.endDate ? { initial_date: p.endDate } : {}), placeholder: { type: 'plain_text', text: '종료일 선택' } },
+    });
+    // 7. 추정치
+    blocks.push({
+      type: 'input', block_id: 'estimate_block', optional: true,
+      label: { type: 'plain_text', text: '최초추정치' },
+      hint: { type: 'plain_text', text: '형식: 숫자 + 단위 (d=일, w=주, h=시간, m=분) 예: 3d, 1w, 1.5h' },
+      element: { type: 'plain_text_input', action_id: 'estimate', initial_value: p.estimate ?? '', placeholder: { type: 'plain_text', text: '예: 3d' } },
+    });
+    // 8. 추가 지시사항
+    blocks.push({
+      type: 'input', block_id: 'instructions_block', optional: true,
+      label: { type: 'plain_text', text: '추가 지시사항 (선택)' },
+      hint: { type: 'plain_text', text: '예: "FE 작업만 추출", "김가빈이 해야 할 API 연동만"' },
+      element: { type: 'plain_text_input', action_id: 'instructions', multiline: true, initial_value: p.instructions },
+    });
+    // 9. 재요약 버튼
+    blocks.push({
+      type: 'actions', block_id: 'regenerate_block',
+      elements: [{ type: 'button', action_id: 'regenerate_summary', text: { type: 'plain_text', text: '🔄 담당자/지시사항 반영해 다시 요약' } }],
+    });
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: draft
+        ? '✨ Groq 가 쓰레드 + 담당자/지시사항 기반으로 초안을 만들었습니다. 수정하거나 🔄 버튼으로 다시 요약할 수 있어요.'
+        : '⚠️ LLM 요약에 실패했습니다. 직접 입력하거나 🔄 버튼으로 다시 시도하세요.' }],
+    });
+
+    await client.views.update({
+      view_id: p.viewId,
+      view: {
+        type: 'modal' as const,
+        callback_id: 'create_ticket_modal',
+        private_metadata: JSON.stringify(metadata),
+        title: { type: 'plain_text' as const, text: 'FEHG 티켓 만들기' },
+        submit: { type: 'plain_text' as const, text: '생성' },
+        close: { type: 'plain_text' as const, text: '취소' },
+        blocks,
+      },
+    });
+  } catch (e) {
+    console.error('[worker] 재요약 실패:', e);
+  }
 };
