@@ -5,6 +5,25 @@ import { createFehgTask, CreatedIssue } from './jira/createIssue';
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+/**
+ * Slack 쓰레드 URL 생성.
+ * 형식: https://{domain}.slack.com/archives/{channel}/p{ts without dot}
+ */
+let cachedDomain: string | null = null;
+const getSlackThreadUrl = async (channel: string, threadTs: string): Promise<string | null> => {
+  try {
+    if (!cachedDomain) {
+      const info = await client.team.info();
+      cachedDomain = (info.team as any)?.domain || null;
+    }
+    if (!cachedDomain) return null;
+    const tsNoDot = threadTs.replace('.', '');
+    return `https://${cachedDomain}.slack.com/archives/${channel}/p${tsNoDot}`;
+  } catch {
+    return null;
+  }
+};
+
 export interface CreateTicketWorkerPayload {
   type: 'create_ticket_work';
   channel: string;
@@ -62,9 +81,15 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
     }
   }
 
+  // Slack 쓰레드 링크를 description 하단에 추가
+  const threadUrl = await getSlackThreadUrl(p.channel, p.threadTs);
+  const descWithLink = threadUrl
+    ? `${p.description}\n\n---\n🔗 Slack 쓰레드: ${threadUrl}`
+    : p.description;
+
   const created = await createFehgTask({
     summary: p.title,
-    description: p.description,
+    description: descWithLink,
     assigneeAccountId,
     epicKey: p.epicKey,
     startDate: p.startDate,
@@ -144,6 +169,12 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
 };
 
 const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
+  // Slack 쓰레드 링크를 description 하단에 추가
+  const batchThreadUrl = await getSlackThreadUrl(p.channel, p.threadTs);
+  const batchDescWithLink = batchThreadUrl
+    ? `${p.description}\n\n---\n🔗 Slack 쓰레드: ${batchThreadUrl}`
+    : p.description;
+
   const results: Array<{
     slackUserId: string;
     created: CreatedIssue | null;
@@ -171,7 +202,7 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
 
       const created = await createFehgTask({
         summary: p.title,
-        description: p.description,
+        description: batchDescWithLink,
         assigneeAccountId,
         epicKey: p.epicKey,
         startDate: p.startDate || undefined,
