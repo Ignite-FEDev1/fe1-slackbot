@@ -7,21 +7,11 @@ const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
  * Slack 쓰레드 URL 생성.
- * 형식: https://{domain}.slack.com/archives/{channel}/p{ts without dot}
+ * https://app.slack.com/client 기반 범용 딥링크 (워크스페이스 도메인 불필요)
  */
-let cachedDomain: string | null = null;
-const getSlackThreadUrl = async (channel: string, threadTs: string): Promise<string | null> => {
-  try {
-    if (!cachedDomain) {
-      const info = await client.team.info();
-      cachedDomain = (info.team as any)?.domain || null;
-    }
-    if (!cachedDomain) return null;
-    const tsNoDot = threadTs.replace('.', '');
-    return `https://${cachedDomain}.slack.com/archives/${channel}/p${tsNoDot}`;
-  } catch {
-    return null;
-  }
+const getSlackThreadUrl = (channel: string, threadTs: string): string => {
+  const tsNoDot = threadTs.replace('.', '');
+  return `https://app.slack.com/client/archives/${channel}/p${tsNoDot}`;
 };
 
 export interface CreateTicketWorkerPayload {
@@ -82,10 +72,8 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
   }
 
   // Slack 쓰레드 링크를 description 하단에 추가
-  const threadUrl = await getSlackThreadUrl(p.channel, p.threadTs);
-  const descWithLink = threadUrl
-    ? `${p.description}\n\n---\n🔗 Slack 쓰레드: ${threadUrl}`
-    : p.description;
+  const threadUrl = getSlackThreadUrl(p.channel, p.threadTs);
+  const descWithLink = `${p.description}\n\n---\n🔗 Slack 쓰레드: ${threadUrl}`;
 
   const created = await createFehgTask({
     summary: p.title,
@@ -170,10 +158,8 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
 
 const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
   // Slack 쓰레드 링크를 description 하단에 추가
-  const batchThreadUrl = await getSlackThreadUrl(p.channel, p.threadTs);
-  const batchDescWithLink = batchThreadUrl
-    ? `${p.description}\n\n---\n🔗 Slack 쓰레드: ${batchThreadUrl}`
-    : p.description;
+  const batchThreadUrl = getSlackThreadUrl(p.channel, p.threadTs);
+  const batchDescWithLink = `${p.description}\n\n---\n🔗 Slack 쓰레드: ${batchThreadUrl}`;
 
   const results: Array<{
     slackUserId: string;
