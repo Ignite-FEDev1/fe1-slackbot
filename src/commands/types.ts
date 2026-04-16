@@ -25,6 +25,7 @@ export interface SlashContext {
   app: App;
   userId: string;
   channelId: string;
+  triggerId: string;
   args: string[];
   respond: (text: string) => Promise<void>;
 }

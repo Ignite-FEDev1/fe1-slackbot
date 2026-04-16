@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "FEHG 티켓 생성기",
+  "version": "1.0.0",
+  "description": "웹 페이지에서 텍스트를 선택하고 우클릭하여 FEHG Jira 티켓을 생성합니다.",
+  "permissions": ["contextMenus", "storage", "activeTab"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

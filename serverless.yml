@@ -16,6 +16,9 @@ provider:
     GROQ_API_KEY: ${env:GROQ_API_KEY}
     NEXT_PUBLIC_DB_URL: ${env:NEXT_PUBLIC_DB_URL}
     DB_SERVICE_ROLE_KEY: ${env:DB_SERVICE_ROLE_KEY}
+    VERCEL_BYPASS_SECRET: ${env:VERCEL_BYPASS_SECRET}
+    EXTENSION_API_KEY: ${env:EXTENSION_API_KEY}
+    EXT_NOTIFY_SLACK_CHANNEL: ${env:EXT_NOTIFY_SLACK_CHANNEL}
   iam:
     role:
       statements:
@@ -34,6 +37,10 @@ functions:
       - http:
           path: slack/events
           method: post
+      - http:
+          path: api/{proxy+}
+          method: any
+          cors: true
 
 plugins:
   - serverless-offline

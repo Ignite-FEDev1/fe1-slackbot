@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>FEHG 티켓 만들기</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      width: 440px; min-height: 180px; color: #172B4D;
+      background: linear-gradient(180deg, #FAFBFC 0%, #F4F5F7 100%);
+    }
+
+    /* ─── 헤더 ─── */
+    .header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px 10px; border-bottom: 1px solid #EBECF0;
+      background: #fff;
+    }
+    .header img { width: 28px; height: 28px; border-radius: 6px; }
+    .header h1 { font-size: 15px; font-weight: 700; color: #172B4D; }
+
+    /* ─── 모드 탭 ─── */
+    .mode-tabs {
+      display: flex; background: #fff; border-bottom: 1px solid #EBECF0;
+    }
+    .mode-tab {
+      flex: 1; padding: 9px 0; text-align: center; font-size: 13px; font-weight: 500;
+      color: #6B778C; cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .mode-tab:hover { color: #172B4D; background: #FAFBFC; }
+    .mode-tab.active { color: #0052CC; border-bottom-color: #0052CC; }
+
+    /* ─── 컨텐츠 영역 ─── */
+    .content { padding: 14px 16px 16px; }
+
+    /* ─── 상태 표시 ─── */
+    .status {
+      padding: 10px 14px; border-radius: 6px; font-size: 13px;
+      margin-bottom: 12px; display: none; line-height: 1.5;
+    }
+    .status.loading { display: block; background: #DEEBFF; color: #0747A6; }
+    .status.success { display: block; background: #E3FCEF; color: #006644; }
+    .status.error { display: block; background: #FFEBE6; color: #BF2600; }
+    .status.warn { display: block; background: #FFF7E6; color: #FF8B00; }
+    .status.info { display: block; background: #F4F5F7; color: #42526E; }
+
+    /* ─── 프리뷰 ─── */
+    .preview {
+      background: #fff; border: 1px solid #EBECF0; border-radius: 6px;
+      padding: 8px 12px; font-size: 12px; color: #505F79;
+      max-height: 54px; overflow-y: auto; margin-bottom: 14px;
+      white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+    }
+
+    /* ─── 폼 ─── */
+    .form-group { margin-bottom: 12px; }
+    label {
+      display: block; font-size: 11px; font-weight: 700;
+      color: #6B778C; margin-bottom: 4px; text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .hint { font-size: 11px; color: #97A0AF; margin-bottom: 4px; }
+
+    input, select, textarea {
+      width: 100%; padding: 7px 10px; border: 1px solid #DFE1E6; border-radius: 4px;
+      font-size: 13px; font-family: inherit; background: #FAFBFC;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: #4C9AFF; background: #fff;
+      box-shadow: 0 0 0 1px #4C9AFF;
+    }
+    textarea { resize: vertical; min-height: 72px; }
+    select { cursor: pointer; }
+
+    .row { display: flex; gap: 8px; }
+    .row > .form-group { flex: 1; }
+
+    /* ─── 멀티 체크박스 (일괄 담당자) ─── */
+    .checkbox-group {
+      max-height: 120px; overflow-y: auto; border: 1px solid #DFE1E6;
+      border-radius: 4px; background: #FAFBFC; padding: 6px 0;
+    }
+    .checkbox-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; font-size: 13px; cursor: pointer;
+    }
+    .checkbox-item:hover { background: #EBECF0; }
+    .checkbox-item input { width: 14px; height: 14px; cursor: pointer; }
+    .checkbox-actions {
+      display: flex; gap: 8px; margin-top: 4px;
+    }
+    .checkbox-actions span {
+      font-size: 11px; color: #0052CC; cursor: pointer;
+    }
+    .checkbox-actions span:hover { text-decoration: underline; }
+
+    /* ─── 버튼 ─── */
+    .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+
+    button {
+      padding: 8px 14px; border: none; border-radius: 4px; font-size: 13px;
+      cursor: pointer; font-weight: 600; transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #0052CC; color: #fff; flex: 1;
+    }
+    .btn-primary:hover { background: #0747A6; }
+    .btn-primary:disabled { background: #B3D4FF; cursor: not-allowed; }
+    .btn-secondary {
+      background: #fff; color: #42526E; border: 1px solid #DFE1E6;
+    }
+    .btn-secondary:hover { background: #F4F5F7; }
+    .btn-secondary:disabled { background: #F4F5F7; color: #A5ADBA; border-color: #EBECF0; cursor: not-allowed; }
+
+    #form { display: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon48.png" alt="logo">
+    <h1>FEHG 티켓 만들기</h1>
+  </div>
+
+  <!-- 모드 탭 -->
+  <div class="mode-tabs" id="modeTabs" style="display:none;">
+    <div class="mode-tab active" data-mode="single">단일 생성</div>
+    <div class="mode-tab" data-mode="batch">일괄 생성</div>
+  </div>
+
+  <div class="content">
+    <!-- 상태 메시지 -->
+    <div class="status warn" id="noConfig">config.js 설정이 필요합니다.</div>
+    <div class="status info" id="noText">텍스트를 선택한 후 우클릭 → <b>FEHG 티켓 만들기</b>를 사용해주세요.</div>
+    <div class="status loading" id="loading">⏳ LLM으로 요약 중입니다...</div>
+    <div class="status" id="result"></div>
+
+    <!-- 폼 -->
+    <div id="form">
+      <div class="preview" id="preview"></div>
+
+      <!-- 단일: 담당자 -->
+      <div class="form-group" id="singleAssigneeGroup">
+        <label for="assignee">담당자</label>
+        <select id="assignee"><option value="">선택 안 함</option></select>
+      </div>
+
+      <!-- 일괄: 담당자들 -->
+      <div class="form-group" id="batchAssigneesGroup" style="display:none;">
+        <label>담당자들</label>
+        <div class="checkbox-group" id="assigneesCheckboxes"></div>
+        <div class="checkbox-actions">
+          <span id="selectAll">전체 선택</span>
+          <span id="deselectAll">전체 해제</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="title">제목</label>
+        <input type="text" id="title" maxlength="250">
+      </div>
+
+      <div class="form-group">
+        <label for="description">본문</label>
+        <textarea id="description" rows="5"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="epic">상위 에픽 *</label>
+        <select id="epic"><option value="">에픽 로딩 중...</option></select>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="startDate">시작일</label>
+          <input type="date" id="startDate">
+        </div>
+        <div class="form-group">
+          <label for="endDate">종료일</label>
+          <input type="date" id="endDate">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="estimate">최초추정치</label>
+        <div class="hint">숫자 + 단위 (d=일, w=주, h=시간, m=분) 예: 3d</div>
+        <input type="text" id="estimate" placeholder="예: 3d">
+      </div>
+
+      <div class="form-group">
+        <label for="instructions">추가 지시사항</label>
+        <div class="hint">예: "FE 작업만 추출", "API 연동만"</div>
+        <textarea id="instructions" rows="2"></textarea>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-secondary" id="resummarize">🔄 재요약</button>
+        <button class="btn-primary" id="submit">생성</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

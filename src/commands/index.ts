@@ -1,6 +1,9 @@
 import { batchTicketCommand } from './batchTicket';
+import { batchTicketUpdateCommand } from './batchTicketUpdate';
 import { createTicketCommand } from './createTicket';
+import { deployRoomCommand } from './deployRoom';
 import { buildHelpCommand } from './help';
+import { pingCommand } from './ping';
 import { Command } from './types';
 
 /**
@@ -10,6 +13,9 @@ import { Command } from './types';
 export const commands: Command[] = [
   createTicketCommand,
   batchTicketCommand,
+  batchTicketUpdateCommand,
+  deployRoomCommand,
+  pingCommand,
   buildHelpCommand(() => commands),
 ];
 

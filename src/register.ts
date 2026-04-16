@@ -32,6 +32,7 @@ export const registerApp = (app: App) => {
       app,
       userId: command.user_id,
       channelId: command.channel_id,
+      triggerId: command.trigger_id,
       args,
       respond: async (text: string) => {
         await respond({ text });

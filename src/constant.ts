@@ -17,3 +17,14 @@ export const SLACK_JIRA_USER_MAP: Record<string, string> = {
   U08H1QS9805: '712020:403a306e-0eff-4d57-9fda-2f517158d40f', // 조한빈
   // U061LC4V0BT: '712020:96cf8ab5-20ff-4d6b-960d-5d38b7a46a39', // 이미진
 };
+
+// Slack user ID → 표시 이름 (Extension 등에서 사용)
+export const SLACK_USER_NAMES: Record<string, string> = {
+  U05PV23Q8AZ: '한준호',
+  U04FBFS5SCX: '손현지',
+  U04D5SP327J: '김가빈',
+  U04DLF61U9K: '박성찬',
+  U04FUFTCGCC: '서성주',
+  U08FJ0Z9ABS: '김찬영',
+  U08H1QS9805: '조한빈',
+};
