@@ -1,4 +1,5 @@
 import { App } from '@slack/bolt';
+import { WebClient } from '@slack/web-api';
 
 /**
  * 하나의 봇 기능 = 하나의 Command 모듈.
@@ -23,6 +24,7 @@ export interface Command {
 
 export interface SlashContext {
   app: App;
+  client: WebClient;
   userId: string;
   channelId: string;
   triggerId: string;

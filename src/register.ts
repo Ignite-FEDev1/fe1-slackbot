@@ -30,6 +30,7 @@ export const registerApp = (app: App) => {
 
     await target.runSlash({
       app,
+      client,
       userId: command.user_id,
       channelId: command.channel_id,
       triggerId: command.trigger_id,
