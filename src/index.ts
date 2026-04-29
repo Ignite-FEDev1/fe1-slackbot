@@ -2,7 +2,7 @@ import { App, AwsLambdaReceiver } from '@slack/bolt';
 import dotenv from 'dotenv';
 import { handleApiRequest } from './api/router';
 import { registerApp } from './register';
-import { handleWorker, WorkerPayload } from './worker';
+import { handleWorker, WORKER_TYPES, WorkerPayload } from './worker';
 
 dotenv.config();
 
@@ -16,17 +16,6 @@ export const app = new App({
 });
 
 registerApp(app);
-
-/** worker payload type 목록 */
-const WORKER_TYPES = new Set([
-  'create_ticket_work',
-  'batch_ticket_work',
-  'regenerate_summary_work',
-  'batch_ticket_bulk_update_work',
-  'create_deploy_room_work',
-  'ext_create_ticket_work',
-  'ext_batch_ticket_work',
-]);
 
 export const handler = async (event: any, context: any, callback: any) => {
   // 비동기 worker 호출 (InvocationType: 'Event') 처리

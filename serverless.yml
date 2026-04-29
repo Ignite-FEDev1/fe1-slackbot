@@ -14,6 +14,10 @@ provider:
     SLACK_BOT_TOKEN: ${env:SLACK_BOT_TOKEN}
     ATLASSIAN_TOKEN: ${env:ATLASSIAN_TOKEN}
     GROQ_API_KEY: ${env:GROQ_API_KEY}
+    ANTHROPIC_API_KEY: ${env:ANTHROPIC_API_KEY}
+    RESEND_API_KEY: ${env:RESEND_API_KEY}
+    GITLAB_BASE_URL: ${env:GITLAB_BASE_URL}
+    GITLAB_TOKEN: ${env:GITLAB_TOKEN}
     NEXT_PUBLIC_DB_URL: ${env:NEXT_PUBLIC_DB_URL}
     DB_SERVICE_ROLE_KEY: ${env:DB_SERVICE_ROLE_KEY}
     VERCEL_BYPASS_SECRET: ${env:VERCEL_BYPASS_SECRET}
@@ -31,8 +35,12 @@ provider:
 functions:
   slack:
     handler: app.handler
-    timeout: 30
+    # API Gateway 한도(29s)와 별개로 worker(직접 invoke) 는 더 오래 돌아야 함.
+    # monthly-report: 두 LLM 호출 + 큰 입력 + 첫 호출 cache_create 합치면 ~150s
+    timeout: 240
     memorySize: 1024
+    # 비동기 invoke 실패 시 자동 재시도 끔 (타임아웃 시 같은 작업 재실행 방지)
+    maximumRetryAttempts: 0
     events:
       - http:
           path: slack/events

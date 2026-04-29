@@ -18,6 +18,26 @@ export const SLACK_JIRA_USER_MAP: Record<string, string> = {
   // U061LC4V0BT: '712020:96cf8ab5-20ff-4d6b-960d-5d38b7a46a39', // 이미진
 };
 
+// monthly-report 분석 대상 채널 (FE1 활동 채널)
+export const MONTHLY_REPORT_CHANNELS: string[] = [
+  'C04G5SZB010',
+  'C04D9PH8N5D',
+  'C04ET5DMYAC',
+  'C0617SQTU67',
+  'C04HYKFMXT2',
+  'C08PRL7LRGT',
+  'C0792KFUV40',
+  'C056PB78CDC',
+];
+
+// monthly-report GitLab MR 조회 대상 프로젝트 (URL-encoded full path)
+export const MONTHLY_REPORT_GITLAB_PROJECTS: string[] = [
+  'hmg-groupware/hmg-groupware-portal/assemble-fe',
+  'kia-cpo/kia-cpo-bo-web',
+  'kia-cpo/kia-cpo-partner-web',
+  'hmg-board/hmg-board-fe',
+];
+
 // Slack user ID → 표시 이름 (Extension 등에서 사용)
 export const SLACK_USER_NAMES: Record<string, string> = {
   U05PV23Q8AZ: '한준호',

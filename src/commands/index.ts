@@ -1,9 +1,11 @@
 import { batchTicketCommand } from './batchTicket';
 import { batchTicketUpdateCommand } from './batchTicketUpdate';
 import { createTicketCommand } from './createTicket';
+import { dailySummaryCommand } from './dailySummary';
 import { deployRoomCommand } from './deployRoom';
 import { deploysCommand } from './deploys';
 import { buildHelpCommand } from './help';
+import { monthlyReportCommand } from './monthlyReport';
 import { pingCommand } from './ping';
 import { weeklyCommand } from './weekly';
 import { Command } from './types';
@@ -19,6 +21,8 @@ export const commands: Command[] = [
   deployRoomCommand,
   deploysCommand,
   weeklyCommand,
+  dailySummaryCommand,
+  monthlyReportCommand,
   pingCommand,
   buildHelpCommand(() => commands),
 ];

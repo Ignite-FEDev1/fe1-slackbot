@@ -1,10 +1,25 @@
 import { WebClient } from '@slack/web-api';
-import { SLACK_JIRA_USER_MAP } from './constant';
+import { MONTHLY_REPORT_CHANNELS, SLACK_JIRA_USER_MAP } from './constant';
 import { getJiraCredsByAccountId } from './db';
 import { createFehgTask, CreatedIssue } from './jira/createIssue';
 import { updateIssue } from './jira/updateIssue';
 import { getActiveEpics } from './jira/epics';
-import { summarizeThreadToTicket, SummarizeContext } from './llm/groq';
+import {
+  summarizeMonthlyAchievements,
+  summarizeMonthlyJiraExecution,
+  summarizeThreadToTicket,
+  SummarizeContext,
+} from './llm/groq';
+import {
+  buildKstMonthRange,
+  fetchConfluenceMonthlyPages,
+  fetchJiraMonthlyIssues,
+  fetchSlackMultiChannel,
+  type ConfluencePage,
+  type GitlabMR,
+  type JiraIssue,
+  type SlackUserMessage,
+} from './monthlyFetchers';
 import { fetchThreadMessages } from './slack/thread';
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
@@ -110,6 +125,12 @@ export interface ExtBatchTicketWorkerPayload {
   sourceUrl?: string;
 }
 
+export interface MonthlyReportWorkerPayload {
+  type: 'monthly_report_work';
+  triggerUserId: string;
+  yearMonth: string; // "2026-04"
+}
+
 export type WorkerPayload =
   | CreateTicketWorkerPayload
   | BatchTicketWorkerPayload
@@ -117,25 +138,17 @@ export type WorkerPayload =
   | BatchTicketBulkUpdateWorkerPayload
   | CreateDeployRoomWorkerPayload
   | ExtCreateTicketWorkerPayload
-  | ExtBatchTicketWorkerPayload;
+  | ExtBatchTicketWorkerPayload
+  | MonthlyReportWorkerPayload;
 
-export const handleWorker = async (payload: WorkerPayload): Promise<void> => {
-  if (payload.type === 'create_ticket_work') {
-    await handleCreateTicketWork(payload);
-  } else if (payload.type === 'batch_ticket_work') {
-    await handleBatchTicketWork(payload);
-  } else if (payload.type === 'regenerate_summary_work') {
-    await handleRegenerateSummary(payload);
-  } else if (payload.type === 'batch_ticket_bulk_update_work') {
-    await handleBatchTicketBulkUpdateWork(payload);
-  } else if (payload.type === 'create_deploy_room_work') {
-    await handleCreateDeployRoom(payload);
-  } else if (payload.type === 'ext_create_ticket_work') {
-    await handleExtCreateTicketWork(payload);
-  } else if (payload.type === 'ext_batch_ticket_work') {
-    await handleExtBatchTicketWork(payload);
-  }
+type WorkerHandlers = {
+  [K in WorkerPayload['type']]: (
+    p: Extract<WorkerPayload, { type: K }>
+  ) => Promise<void>;
 };
+
+// 실제 dispatch (WORKER_HANDLERS / WORKER_TYPES / handleWorker) 는 파일 끝에서 정의.
+// handler 함수가 const arrow 라 hoisting 안 됨 → 정의 후 참조해야 TDZ 회피.
 
 const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
   const assigneeAccountId = SLACK_JIRA_USER_MAP[p.assigneeSlackId] || undefined;
@@ -831,4 +844,340 @@ const handleExtBatchTicketWork = async (p: ExtBatchTicketWorkerPayload) => {
       },
     ],
   });
+};
+
+// Claude Sonnet 4.6 200K context, 여유 마진 확보
+const MONTHLY_MAX_INPUT_CHARS = 80000;
+
+const describeSlackChannelError = (reason: string): string => {
+  switch (reason) {
+    case 'not_in_channel':
+      return '봇 미초대';
+    case 'channel_not_found':
+      return '채널 없음/삭제됨';
+    case 'missing_scope':
+      return '봇 권한 부족';
+    default:
+      return reason;
+  }
+};
+
+const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
+  try {
+    const range = buildKstMonthRange(p.yearMonth);
+
+    const jiraAccountId = SLACK_JIRA_USER_MAP[p.triggerUserId];
+
+    const userInfoPromise = client.users.info({ user: p.triggerUserId }).catch(() => null);
+    const credsPromise = jiraAccountId
+      ? getJiraCredsByAccountId(jiraAccountId).catch(() => null)
+      : Promise.resolve(null);
+
+    const slackPromise = fetchSlackMultiChannel(
+      client,
+      MONTHLY_REPORT_CHANNELS,
+      p.triggerUserId,
+      range
+    );
+
+    const igniteCreds = await credsPromise;
+    const igniteAuth =
+      igniteCreds?.igniteJiraEmail && igniteCreds?.igniteJiraApiToken
+        ? { email: igniteCreds.igniteJiraEmail, token: igniteCreds.igniteJiraApiToken }
+        : null;
+
+    const confluencePromise =
+      jiraAccountId && igniteAuth
+        ? fetchConfluenceMonthlyPages(igniteAuth, jiraAccountId, range)
+        : Promise.resolve([] as ConfluencePage[]);
+    // ignite 인스턴스의 FEHG 프로젝트만 조회
+    const jiraPromise =
+      jiraAccountId && igniteAuth
+        ? fetchJiraMonthlyIssues('ignite', igniteAuth, jiraAccountId, range, ['FEHG'])
+        : Promise.resolve([] as JiraIssue[]);
+
+    const [userInfo, slackResult, confluencePages, jiraIssues] = await Promise.all([
+      userInfoPromise,
+      slackPromise,
+      confluencePromise,
+      jiraPromise,
+    ]);
+
+    const userName =
+      userInfo?.user?.profile?.display_name ||
+      userInfo?.user?.real_name ||
+      p.triggerUserId;
+
+    const slackMessages = slackResult.messages;
+    const failedChannels = slackResult.failedChannels;
+
+    console.log(
+      `[worker] monthly-report 수집 완료: slack=${slackMessages.length} (실패채널 ${failedChannels.length}), confluence=${confluencePages.length}, jira=${jiraIssues.length}`
+    );
+
+    const rawText = buildMonthlyInput(
+      slackMessages,
+      [],
+      confluencePages,
+      [],
+      MONTHLY_MAX_INPUT_CHARS
+    );
+
+    const jiraTicketsBlock = buildJiraTicketsBlock(jiraIssues);
+
+    if (!rawText.trim() && !jiraTicketsBlock.trim()) {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `📊 *${userName}의 ${p.yearMonth} 성과* — 분석 가능한 데이터 없음`,
+      });
+      return;
+    }
+
+    // 성과(Q코드) 와 수행(Jira 그룹핑) 두 LLM 호출 병렬
+    const [achievementSummary, executionSummary] = await Promise.all([
+      rawText.trim()
+        ? summarizeMonthlyAchievements(
+            rawText,
+            userName,
+            `(Slack ${MONTHLY_REPORT_CHANNELS.length}개 + Confluence)`,
+            p.yearMonth,
+            {
+              slackMessageCount: slackMessages.length,
+              confluencePageCount: confluencePages.length,
+              jiraIssueCount: jiraIssues.length,
+            }
+          )
+        : Promise.resolve(null),
+      jiraTicketsBlock.trim()
+        ? summarizeMonthlyJiraExecution(jiraTicketsBlock, userName, p.yearMonth)
+        : Promise.resolve(null),
+    ]);
+
+    const sections: string[] = [];
+    if (achievementSummary) {
+      sections.push(`# 🏆 성과 (Q코드 기반)\n\n${achievementSummary}`);
+    } else if (rawText.trim()) {
+      sections.push('# 🏆 성과 (Q코드 기반)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.');
+    }
+    if (executionSummary) {
+      sections.push(`# 📋 수행 (Jira 티켓)\n\n${executionSummary}`);
+    } else if (jiraTicketsBlock.trim()) {
+      sections.push('# 📋 수행 (Jira 티켓)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.');
+    }
+    const finalSummary = sections.join('\n\n---\n\n');
+
+    // 통계 라인
+    const statsParts = [
+      `Slack ${slackMessages.length}건`,
+      `Confluence ${confluencePages.length}페이지`,
+      `Jira ${jiraIssues.length}티켓`,
+    ];
+    if (failedChannels.length > 0) {
+      const formatted = failedChannels
+        .map((f) => `<#${f.channelId}> (${describeSlackChannelError(f.reason)})`)
+        .join(', ');
+      statsParts.push(`⚠️ Slack ${failedChannels.length}채널 미수집: ${formatted}`);
+    }
+    if (jiraAccountId && !igniteAuth) {
+      statsParts.push('⚠️ Atlassian 인증 없음 → Confluence/Jira skip');
+    }
+    if (!jiraAccountId) {
+      statsParts.push('⚠️ accountId 매핑 없음 → Atlassian skip');
+    }
+    const statsLine = `📝 수집: ${statsParts.join(' · ')}`;
+
+    // DM 전송: 단락 경계로 동적 split
+    const dmBlocks: any[] = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `📊 *${userName}의 ${p.yearMonth} 월간 성과 (멀티소스)*`,
+        },
+      },
+      { type: 'divider' },
+      ...splitForSlackBlocks(finalSummary).map((text) => ({
+        type: 'section' as const,
+        text: { type: 'mrkdwn' as const, text },
+      })),
+      { type: 'divider' },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: statsLine }],
+      },
+    ];
+
+    await client.chat.postMessage({
+      channel: p.triggerUserId,
+      text: `${userName}의 ${p.yearMonth} 성과 (멀티소스)`,
+      blocks: dmBlocks,
+    });
+
+    // 메일 발송은 ignite.co.kr 도메인 인증 후 활성화 예정
+    // (Resend free tier: from=onboarding@resend.dev 는 가입자 본인 이메일에만 발송 가능)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[worker] monthly-report 실패:', msg);
+    try {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `❌ 월간 성과 분석 실패: ${msg}`,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+};
+
+/**
+ * Jira 티켓 목록을 LLM 입력용 평면 텍스트 블록으로.
+ * 각 티켓: `[KEY] (project) summary — status: ... · epic: ...`
+ */
+const buildJiraTicketsBlock = (issues: JiraIssue[]): string => {
+  if (issues.length === 0) return '';
+  const lines = issues.map((i) => {
+    const epicPart = i.epicSummary ? ` · epic: ${i.epicSummary}` : '';
+    return `- [${i.key}] (${i.projectName}) ${i.summary} — status: ${i.status}${epicPart}`;
+  });
+  return `<JIRA 티켓 (해당 월 본인 활동, ${issues.length}건)>\n${lines.join('\n')}\n</JIRA>`;
+};
+
+/**
+ * 마크다운 본문을 Slack section 한도(3000자) 안의 청크로 단락 경계 기준 split.
+ * 너무 길어 잘리면 마지막 청크 뒤에 알림.
+ */
+const splitForSlackBlocks = (body: string): string[] => {
+  const SECTION_LIMIT = 2900; // 3000 한도, 안전 마진
+  const HARD_CAP_CHUNKS = 12; // Slack section block ~50개 한도 안에서 충분히 여유
+  const paragraphs = body.split(/\n\n+/);
+  const chunks: string[] = [];
+  let cur = '';
+  for (const para of paragraphs) {
+    const candidate = cur ? `${cur}\n\n${para}` : para;
+    if (candidate.length <= SECTION_LIMIT) {
+      cur = candidate;
+      continue;
+    }
+    if (cur) chunks.push(cur);
+    if (para.length <= SECTION_LIMIT) {
+      cur = para;
+    } else {
+      // 단일 단락이 너무 길면 hard slice
+      for (let i = 0; i < para.length; i += SECTION_LIMIT) {
+        chunks.push(para.slice(i, i + SECTION_LIMIT));
+      }
+      cur = '';
+    }
+  }
+  if (cur) chunks.push(cur);
+
+  if (chunks.length > HARD_CAP_CHUNKS) {
+    const head = chunks.slice(0, HARD_CAP_CHUNKS);
+    head[HARD_CAP_CHUNKS - 1] += '\n\n_…내용이 길어 이후 부분 생략됨._';
+    return head;
+  }
+  return chunks;
+};
+
+/**
+ * 4개 소스 데이터를 LLM 입력용 단일 텍스트로 빌드.
+ * 컨텍스트 한도 보호: Slack 메시지는 길이 desc 우선 선정, 최종은 시간순.
+ */
+const buildMonthlyInput = (
+  slack: SlackUserMessage[],
+  jira: JiraIssue[],
+  confluence: ConfluencePage[],
+  gitlab: GitlabMR[],
+  maxChars: number
+): string => {
+  const sections: string[] = [];
+
+  // Jira 섹션
+  if (jira.length > 0) {
+    const lines = jira
+      .slice(0, 100)
+      .map((i) => `- [${i.key}] ${i.summary} (status: ${i.status}${i.resolved ? `, resolved: ${i.resolved}` : ''}) ${i.url}`)
+      .join('\n');
+    sections.push(`<JIRA 티켓 (${jira.length}건)>\n${lines}\n</JIRA>`);
+  }
+
+  // Confluence 섹션
+  if (confluence.length > 0) {
+    const lines = confluence
+      .slice(0, 50)
+      .map((c) => `- [${c.type}] ${c.title} (space: ${c.spaceKey}, ${c.date}) ${c.url}`)
+      .join('\n');
+    sections.push(`<CONFLUENCE 페이지 (${confluence.length}건)>\n${lines}\n</CONFLUENCE>`);
+  }
+
+  // GitLab 섹션
+  if (gitlab.length > 0) {
+    const lines = gitlab
+      .slice(0, 100)
+      .map(
+        (m) =>
+          `- [${m.project}] !${m.iid} ${m.title} (state: ${m.state}${m.mergedAt ? `, merged: ${m.mergedAt}` : ''}) ${m.url}`
+      )
+      .join('\n');
+    sections.push(`<GITLAB MR (${gitlab.length}건)>\n${lines}\n</GITLAB>`);
+  }
+
+  // Slack 섹션 (남은 char budget 사용)
+  const headerSize = sections.join('\n\n').length;
+  const slackBudget = Math.max(0, maxChars - headerSize - 1000);
+
+  const buildSlackBlock = (m: SlackUserMessage) =>
+    `[${m.date} | <#${m.channelId}> | ${m.permalink}]\n${m.text}\n\n---\n\n`;
+
+  const byLengthDesc = [...slack].sort((a, b) => b.text.length - a.text.length);
+  const selected = new Set<string>();
+  let used = 0;
+  for (const m of byLengthDesc) {
+    const block = buildSlackBlock(m);
+    if (used + block.length > slackBudget) continue;
+    selected.add(m.ts);
+    used += block.length;
+  }
+
+  if (selected.size > 0) {
+    const sorted = [...slack].sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
+    const slackText = sorted
+      .filter((m) => selected.has(m.ts))
+      .map(buildSlackBlock)
+      .join('');
+    const truncNote =
+      selected.size < slack.length
+        ? `\n(전체 ${slack.length}건 중 ${selected.size}건만 분석)\n`
+        : '';
+    sections.push(`<SLACK 메시지 (${selected.size}건)>${truncNote}\n${slackText}</SLACK>`);
+  }
+
+  return sections.join('\n\n');
+};
+
+// ─── Dispatch (파일 끝에 위치: 위쪽 const handler 함수들의 TDZ 회피) ──
+
+// satisfies 가 새 worker payload type 추가 시 컴파일 에러로 누락을 잡아준다.
+const WORKER_HANDLERS = {
+  create_ticket_work: handleCreateTicketWork,
+  batch_ticket_work: handleBatchTicketWork,
+  regenerate_summary_work: handleRegenerateSummary,
+  batch_ticket_bulk_update_work: handleBatchTicketBulkUpdateWork,
+  create_deploy_room_work: handleCreateDeployRoom,
+  ext_create_ticket_work: handleExtCreateTicketWork,
+  ext_batch_ticket_work: handleExtBatchTicketWork,
+  monthly_report_work: handleMonthlyReportWork,
+} satisfies WorkerHandlers;
+
+export const WORKER_TYPES: ReadonlySet<WorkerPayload['type']> = new Set(
+  Object.keys(WORKER_HANDLERS) as WorkerPayload['type'][]
+);
+
+export const handleWorker = async (payload: WorkerPayload): Promise<void> => {
+  const handler = WORKER_HANDLERS[payload.type] as (p: WorkerPayload) => Promise<void>;
+  if (!handler) {
+    console.error('[worker] 알 수 없는 payload type:', (payload as { type: string }).type);
+    return;
+  }
+  await handler(payload);
 };
