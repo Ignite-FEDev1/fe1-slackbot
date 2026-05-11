@@ -1,6 +1,6 @@
 import { WebClient } from '@slack/web-api';
 import { SLACK_USER_NAMES } from '../constant';
-import { summarizeUserDoneFromDailyScrum } from '../llm/groq';
+import { summarizeUserDoneFromDailyScrum } from '../llm/summarize';
 import { KST_OFFSET_MS, nowKst, tsToKstDateLabel } from '../util/kst';
 import { Command } from './types';
 

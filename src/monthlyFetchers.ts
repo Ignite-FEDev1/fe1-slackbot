@@ -45,11 +45,14 @@ interface OneChannelResult {
   errorMsg?: string;
 }
 
+/** slack 채널 수집은 oldestSec/latestSec 만 쓰므로 월/주 range 양쪽에서 재사용 가능 */
+type SlackTimeWindow = { oldestSec: number; latestSec: number };
+
 const fetchSlackOneChannel = async (
   client: WebClient,
   channelId: string,
   triggerUserId: string,
-  range: MonthRange
+  range: SlackTimeWindow
 ): Promise<OneChannelResult> => {
   const results: SlackUserMessage[] = [];
   const seenTs = new Set<string>();
@@ -167,7 +170,7 @@ export const fetchSlackMultiChannel = async (
   client: WebClient,
   channelIds: string[],
   triggerUserId: string,
-  range: MonthRange
+  range: SlackTimeWindow
 ): Promise<SlackMultiResult> => {
   const all: SlackUserMessage[] = [];
   const failedChannels: { channelId: string; reason: string }[] = [];

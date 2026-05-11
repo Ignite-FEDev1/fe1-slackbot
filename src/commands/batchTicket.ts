@@ -6,7 +6,7 @@ import {
   BatchSummarizeContext,
   summarizeThreadForBatchTicket,
   TicketDraft,
-} from '../llm/groq';
+} from '../llm/summarize';
 import { fetchThreadMessages } from '../slack/thread';
 import { Command } from './types';
 
@@ -14,11 +14,15 @@ const SHORTCUT_ID = 'create_batch_tickets_from_thread';
 const VIEW_ID = 'create_batch_tickets_modal';
 const REGENERATE_ACTION_ID = 'regenerate_batch_summary';
 
-interface PrivateMetadata {
+export interface BatchTicketPrivateMetadata {
   channel: string;
   threadTs: string;
   triggerUserId: string;
 }
+
+type PrivateMetadata = BatchTicketPrivateMetadata;
+
+export const BATCH_TICKET_VIEW_ID = 'create_batch_tickets_modal';
 
 // 최초추정치 포맷 검증 (fe1-web 과 동일한 패턴)
 const ESTIMATE_PATTERN = /^(\d+\.?\d*)(d|m|w|h)$/i;
@@ -32,10 +36,11 @@ const isValidDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
  * SLACK_JIRA_USER_MAP 에 등록된 사람들을 FE1 팀원으로 간주한다.
  * 배치 티켓 생성 시 초기 선택 상태가 된다.
  */
-const getDefaultTeamSlackIds = (): string[] => Object.keys(SLACK_JIRA_USER_MAP);
+export const getDefaultTeamSlackIds = (): string[] =>
+  Object.keys(SLACK_JIRA_USER_MAP);
 
-interface BuildModalParams {
-  metadata: PrivateMetadata;
+export interface BatchTicketBuildModalParams {
+  metadata: BatchTicketPrivateMetadata;
   epics: JiraEpic[];
   draft: TicketDraft | null;
   selectedUsers: string[];
@@ -46,7 +51,9 @@ interface BuildModalParams {
   estimate?: string;
 }
 
-const buildModalView = ({
+type BuildModalParams = BatchTicketBuildModalParams;
+
+export const buildBatchTicketModalView = ({
   metadata,
   epics,
   draft,
@@ -248,7 +255,7 @@ export const batchTicketCommand: Command = {
     '여러 명에게 동일한 FEHG 티켓 일괄 생성 (배포 모니터링 등). 쓰레드에서 메시지 우클릭 → 배치 티켓 만들기',
 
   register(app: App) {
-    // 1) 메시지 숏컷
+    // 1) 메시지 숏컷 — 로딩 모달만 즉시 오픈하고 fetch + LLM 은 worker 위임
     app.shortcut(SHORTCUT_ID, async ({ shortcut, ack, client }) => {
       await ack();
 
@@ -269,60 +276,51 @@ export const batchTicketCommand: Command = {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '⏳ 쓰레드를 읽고 Groq 로 요약 중입니다...',
+                text: '⏳ 쓰레드를 읽고 LLM 으로 요약 중입니다...',
               },
             },
           ],
         },
       });
 
+      const viewId = loading.view?.id;
+      if (!viewId) {
+        console.error('[batchTicket] views.open 응답에 view.id 없음');
+        return;
+      }
+
       try {
-        const defaultUsers = getDefaultTeamSlackIds();
-        const [messages, epics] = await Promise.all([
-          fetchThreadMessages(client, channel, threadTs),
-          getActiveEpics(),
-        ]);
-
-        const draft = await summarizeThreadForBatchTicket(messages, {
-          assigneeCount: defaultUsers.length,
-        });
-
-        const metadata: PrivateMetadata = {
+        await invokeWorker({
+          type: 'init_batch_ticket_modal_work',
+          viewId,
           channel,
           threadTs,
           triggerUserId,
-        };
-
-        await client.views.update({
-          view_id: loading.view?.id,
-          view: buildModalView({
-            metadata,
-            epics,
-            draft,
-            selectedUsers: defaultUsers,
-            instructions: '',
-          }),
         });
       } catch (e) {
-        console.error('[batchTicket] 모달 준비 실패:', e);
-        await client.views.update({
-          view_id: loading.view?.id,
-          view: {
-            type: 'modal',
-            callback_id: VIEW_ID + '_error',
-            title: { type: 'plain_text', text: '배치 티켓 만들기' },
-            close: { type: 'plain_text', text: '닫기' },
-            blocks: [
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: '❌ 쓰레드를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.',
+        console.error('[batchTicket] invokeWorker 실패:', e);
+        try {
+          await client.views.update({
+            view_id: viewId,
+            view: {
+              type: 'modal',
+              callback_id: VIEW_ID + '_error',
+              title: { type: 'plain_text', text: '배치 티켓 만들기' },
+              close: { type: 'plain_text', text: '닫기' },
+              blocks: [
+                {
+                  type: 'section',
+                  text: {
+                    type: 'mrkdwn',
+                    text: '❌ Worker 호출 실패. 잠시 후 다시 시도해주세요.',
+                  },
                 },
-              },
-            ],
-          },
-        });
+              ],
+            },
+          });
+        } catch {
+          /* ignore */
+        }
       }
     });
 
@@ -368,7 +366,7 @@ export const batchTicketCommand: Command = {
         await client.views.update({
           view_id: view.id,
           hash: view.hash,
-          view: buildModalView({
+          view: buildBatchTicketModalView({
             metadata,
             epics,
             draft,

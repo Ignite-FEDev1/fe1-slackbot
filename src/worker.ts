@@ -1,5 +1,9 @@
 import { WebClient } from '@slack/web-api';
-import { MONTHLY_REPORT_CHANNELS, SLACK_JIRA_USER_MAP } from './constant';
+import {
+  DAILY_SCRUM_CHANNEL,
+  MONTHLY_REPORT_CHANNELS,
+  SLACK_JIRA_USER_MAP,
+} from './constant';
 import { getJiraCredsByAccountId } from './db';
 import { createFehgTask, CreatedIssue } from './jira/createIssue';
 import { updateIssue } from './jira/updateIssue';
@@ -7,9 +11,19 @@ import { getActiveEpics } from './jira/epics';
 import {
   summarizeMonthlyAchievements,
   summarizeMonthlyJiraExecution,
+  summarizeThreadForBatchTicket,
   summarizeThreadToTicket,
+  summarizeWeeklyReport,
   SummarizeContext,
-} from './llm/groq';
+} from './llm/summarize';
+import {
+  buildCreateTicketModalView,
+  getSlackDisplayName,
+} from './commands/createTicket';
+import {
+  buildBatchTicketModalView,
+  getDefaultTeamSlackIds,
+} from './commands/batchTicket';
 import {
   buildKstMonthRange,
   fetchConfluenceMonthlyPages,
@@ -21,6 +35,13 @@ import {
   type SlackUserMessage,
 } from './monthlyFetchers';
 import { fetchThreadMessages } from './slack/thread';
+import {
+  buildKstWeekRange,
+  fetchDailyScrumWeeklyReplies,
+  fetchJiraNextWeekIssues,
+  type DailyScrumReply,
+  type NextWeekJiraIssue,
+} from './weeklyFetchers';
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
@@ -131,6 +152,31 @@ export interface MonthlyReportWorkerPayload {
   yearMonth: string; // "2026-04"
 }
 
+export interface WeeklyReportWorkerPayload {
+  type: 'weekly_report_work';
+  triggerUserId: string;
+  /** 한 일 주의 월요일 'YYYY-MM-DD' (UI 에서 선택값) */
+  weekMonday: string;
+}
+
+/** 단일 티켓 모달 초기 LLM 요약 + 모달 update */
+export interface InitTicketModalWorkerPayload {
+  type: 'init_ticket_modal_work';
+  viewId: string;
+  channel: string;
+  threadTs: string;
+  triggerUserId: string;
+}
+
+/** 배치 티켓 모달 초기 LLM 요약 + 모달 update */
+export interface InitBatchTicketModalWorkerPayload {
+  type: 'init_batch_ticket_modal_work';
+  viewId: string;
+  channel: string;
+  threadTs: string;
+  triggerUserId: string;
+}
+
 export type WorkerPayload =
   | CreateTicketWorkerPayload
   | BatchTicketWorkerPayload
@@ -139,7 +185,10 @@ export type WorkerPayload =
   | CreateDeployRoomWorkerPayload
   | ExtCreateTicketWorkerPayload
   | ExtBatchTicketWorkerPayload
-  | MonthlyReportWorkerPayload;
+  | MonthlyReportWorkerPayload
+  | WeeklyReportWorkerPayload
+  | InitTicketModalWorkerPayload
+  | InitBatchTicketModalWorkerPayload;
 
 type WorkerHandlers = {
   [K in WorkerPayload['type']]: (
@@ -1155,6 +1204,330 @@ const buildMonthlyInput = (
   return sections.join('\n\n');
 };
 
+// ─── 위클리 리포트 worker ──────────────────────────────────────────
+
+const WEEKLY_MAX_INPUT_CHARS = 80000;
+
+const buildWeeklyDailyScrumBlock = (replies: DailyScrumReply[]): string => {
+  if (replies.length === 0) return '';
+  const lines = replies.map(
+    (r) => `[${r.dateLabel} ts=${r.ts}] ${r.text}`
+  );
+  return `<DAILY_SCRUM 본인 댓글 (${replies.length}건, 시간순)>\n${lines.join('\n\n---\n\n')}\n</DAILY_SCRUM>`;
+};
+
+const buildWeeklyJiraBlock = (issues: NextWeekJiraIssue[]): string => {
+  if (issues.length === 0) return '';
+  const lines = issues.map((i) => {
+    const epicPart = i.epicSummary ? ` · epic: ${i.epicSummary}` : '';
+    const range =
+      i.startDate && i.dueDate
+        ? ` · ${i.startDate} ~ ${i.dueDate}`
+        : i.startDate
+        ? ` · 시작 ${i.startDate}`
+        : i.dueDate
+        ? ` · 종료 ${i.dueDate}`
+        : '';
+    return `- [${i.key}] ${i.summary} — status: ${i.status}${epicPart}${range}`;
+  });
+  return `<JIRA 다음 주 진행 본인 FEHG 티켓 (${issues.length}건)>\n${lines.join('\n')}\n</JIRA>`;
+};
+
+const buildWeeklySlackBlock = (
+  msgs: SlackUserMessage[],
+  budget: number
+): string => {
+  if (msgs.length === 0) return '';
+  const buildOne = (m: SlackUserMessage) =>
+    `[${m.date} | <#${m.channelId}> | ${m.permalink}]\n${m.text}\n\n---\n\n`;
+  const byLen = [...msgs].sort((a, b) => b.text.length - a.text.length);
+  const selected = new Set<string>();
+  let used = 0;
+  for (const m of byLen) {
+    const block = buildOne(m);
+    if (used + block.length > budget) continue;
+    selected.add(m.ts);
+    used += block.length;
+  }
+  if (selected.size === 0) return '';
+  const sorted = [...msgs].sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
+  const text = sorted.filter((m) => selected.has(m.ts)).map(buildOne).join('');
+  const truncNote =
+    selected.size < msgs.length
+      ? ` (전체 ${msgs.length}건 중 ${selected.size}건만 분석)`
+      : '';
+  return `<SLACK 본인 메시지 (활동 채널, ${selected.size}건${truncNote})>\n${text}</SLACK>`;
+};
+
+const splitWeeklyForSlackBlocks = (body: string): string[] => {
+  const SECTION_LIMIT = 2900;
+  const paragraphs = body.split(/\n\n+/);
+  const chunks: string[] = [];
+  let cur = '';
+  for (const para of paragraphs) {
+    const candidate = cur ? `${cur}\n\n${para}` : para;
+    if (candidate.length <= SECTION_LIMIT) {
+      cur = candidate;
+      continue;
+    }
+    if (cur) chunks.push(cur);
+    if (para.length <= SECTION_LIMIT) {
+      cur = para;
+    } else {
+      for (let i = 0; i < para.length; i += SECTION_LIMIT) {
+        chunks.push(para.slice(i, i + SECTION_LIMIT));
+      }
+      cur = '';
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+};
+
+const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
+  try {
+    const doneRange = buildKstWeekRange(p.weekMonday);
+    // 다음 주 = 한 일 주 + 7일
+    const [y, m, d] = p.weekMonday.split('-').map((s) => parseInt(s, 10));
+    const nextMonUtc = new Date(Date.UTC(y, m - 1, d + 7));
+    const nextMonday = nextMonUtc.toISOString().slice(0, 10);
+    const todoRange = buildKstWeekRange(nextMonday);
+
+    const jiraAccountId = SLACK_JIRA_USER_MAP[p.triggerUserId];
+
+    const userInfoPromise = client.users.info({ user: p.triggerUserId }).catch(() => null);
+    const credsPromise = jiraAccountId
+      ? getJiraCredsByAccountId(jiraAccountId).catch(() => null)
+      : Promise.resolve(null);
+
+    const dailyScrumPromise = fetchDailyScrumWeeklyReplies(
+      client,
+      DAILY_SCRUM_CHANNEL,
+      p.triggerUserId,
+      doneRange
+    );
+    const slackPromise = fetchSlackMultiChannel(
+      client,
+      MONTHLY_REPORT_CHANNELS,
+      p.triggerUserId,
+      doneRange
+    );
+
+    const igniteCreds = await credsPromise;
+    const igniteAuth =
+      igniteCreds?.igniteJiraEmail && igniteCreds?.igniteJiraApiToken
+        ? { email: igniteCreds.igniteJiraEmail, token: igniteCreds.igniteJiraApiToken }
+        : null;
+
+    const jiraPromise =
+      jiraAccountId && igniteAuth
+        ? fetchJiraNextWeekIssues(igniteAuth, jiraAccountId, todoRange)
+        : Promise.resolve([] as NextWeekJiraIssue[]);
+
+    const [userInfo, dailyReplies, slackResult, jiraIssues] = await Promise.all([
+      userInfoPromise,
+      dailyScrumPromise,
+      slackPromise,
+      jiraPromise,
+    ]);
+
+    const userName =
+      userInfo?.user?.profile?.display_name ||
+      userInfo?.user?.real_name ||
+      p.triggerUserId;
+
+    console.log(
+      `[worker] weekly-report 수집 완료: daily=${dailyReplies.length}, slack=${slackResult.messages.length}, jira=${jiraIssues.length}`
+    );
+
+    const dailyBlock = buildWeeklyDailyScrumBlock(dailyReplies);
+    const jiraBlock = buildWeeklyJiraBlock(jiraIssues);
+    // SLACK 블록은 남은 char budget 내에서
+    const headerSize = (dailyBlock.length + jiraBlock.length) || 0;
+    const slackBudget = Math.max(0, WEEKLY_MAX_INPUT_CHARS - headerSize - 1000);
+    const slackBlock = buildWeeklySlackBlock(slackResult.messages, slackBudget);
+
+    const inputBlock = [dailyBlock, jiraBlock, slackBlock].filter(Boolean).join('\n\n');
+
+    if (!inputBlock.trim()) {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `📅 *${userName}의 위클리 (${doneRange.monday} ~ ${doneRange.friday})* — 분석 가능한 데이터 없음`,
+      });
+      return;
+    }
+
+    const summary = await summarizeWeeklyReport(
+      inputBlock,
+      userName,
+      { from: doneRange.monday, to: doneRange.friday },
+      { from: todoRange.monday, to: todoRange.friday }
+    );
+
+    if (!summary) {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `❌ 위클리 LLM 요약 실패. 로그 확인 필요.`,
+      });
+      return;
+    }
+
+    const sections = [
+      `# ✅ 한 일 (${doneRange.monday} ~ ${doneRange.friday})\n\n${summary.done || '_(데이터 없음)_'}`,
+      `# 📋 할 일 (다음 주: ${todoRange.monday} ~ ${todoRange.friday})\n\n${summary.todo || '_(데이터 없음)_'}`,
+      `# 💬 이슈/공유\n\n${summary.issues || '_(데이터 없음)_'}`,
+    ];
+    const finalBody = sections.join('\n\n---\n\n');
+
+    const statsLine = `📝 수집: 데일리 ${dailyReplies.length}건 · 다음주 티켓 ${jiraIssues.length}건 · 슬랙 ${slackResult.messages.length}건${
+      slackResult.failedChannels.length > 0
+        ? ` · ⚠️ Slack ${slackResult.failedChannels.length}채널 미수집`
+        : ''
+    }${jiraAccountId && !igniteAuth ? ' · ⚠️ Atlassian 인증 없음 → Jira skip' : ''}${
+      !jiraAccountId ? ' · ⚠️ accountId 매핑 없음 → Jira skip' : ''
+    }`;
+
+    const dmBlocks: any[] = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `📅 *${userName}의 위클리 (${doneRange.monday} ~ ${doneRange.friday})*`,
+        },
+      },
+      { type: 'divider' },
+      ...splitWeeklyForSlackBlocks(finalBody).map((text) => ({
+        type: 'section' as const,
+        text: { type: 'mrkdwn' as const, text },
+      })),
+      { type: 'divider' },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] },
+    ];
+
+    await client.chat.postMessage({
+      channel: p.triggerUserId,
+      text: `${userName}의 위클리 (${doneRange.monday} ~ ${doneRange.friday})`,
+      blocks: dmBlocks,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[worker] weekly-report 실패:', msg);
+    try {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `❌ 위클리 분석 실패: ${msg}`,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+};
+
+// ─── 티켓 모달 초기화 (LLM 요약 + 모달 update) ──────────────────────
+
+const renderTicketModalError = async (
+  viewId: string,
+  callbackId: string,
+  title: string
+) => {
+  try {
+    await client.views.update({
+      view_id: viewId,
+      view: {
+        type: 'modal',
+        callback_id: callbackId,
+        title: { type: 'plain_text', text: title },
+        close: { type: 'plain_text', text: '닫기' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '❌ 쓰레드를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.',
+            },
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    console.error('[worker] 에러 모달 update 실패:', e);
+  }
+};
+
+const handleInitTicketModalWork = async (p: InitTicketModalWorkerPayload) => {
+  try {
+    const [messages, epics, triggerName] = await Promise.all([
+      fetchThreadMessages(client, p.channel, p.threadTs),
+      getActiveEpics(),
+      getSlackDisplayName(client, p.triggerUserId),
+    ]);
+
+    const draft = await summarizeThreadToTicket(messages, {
+      assigneeName: triggerName,
+    });
+
+    await client.views.update({
+      view_id: p.viewId,
+      view: buildCreateTicketModalView({
+        metadata: {
+          channel: p.channel,
+          threadTs: p.threadTs,
+          triggerUserId: p.triggerUserId,
+        },
+        epics,
+        draft,
+        assigneeUserId: p.triggerUserId,
+        instructions: '',
+      }),
+    });
+  } catch (e) {
+    console.error('[worker] init-ticket-modal 실패:', e);
+    await renderTicketModalError(
+      p.viewId,
+      'create_ticket_modal_error',
+      '티켓 만들기'
+    );
+  }
+};
+
+const handleInitBatchTicketModalWork = async (
+  p: InitBatchTicketModalWorkerPayload
+) => {
+  try {
+    const defaultUsers = getDefaultTeamSlackIds();
+    const [messages, epics] = await Promise.all([
+      fetchThreadMessages(client, p.channel, p.threadTs),
+      getActiveEpics(),
+    ]);
+
+    const draft = await summarizeThreadForBatchTicket(messages, {
+      assigneeCount: defaultUsers.length,
+    });
+
+    await client.views.update({
+      view_id: p.viewId,
+      view: buildBatchTicketModalView({
+        metadata: {
+          channel: p.channel,
+          threadTs: p.threadTs,
+          triggerUserId: p.triggerUserId,
+        },
+        epics,
+        draft,
+        selectedUsers: defaultUsers,
+        instructions: '',
+      }),
+    });
+  } catch (e) {
+    console.error('[worker] init-batch-ticket-modal 실패:', e);
+    await renderTicketModalError(
+      p.viewId,
+      'create_batch_tickets_modal_error',
+      '배치 티켓 만들기'
+    );
+  }
+};
+
 // ─── Dispatch (파일 끝에 위치: 위쪽 const handler 함수들의 TDZ 회피) ──
 
 // satisfies 가 새 worker payload type 추가 시 컴파일 에러로 누락을 잡아준다.
@@ -1167,6 +1540,9 @@ const WORKER_HANDLERS = {
   ext_create_ticket_work: handleExtCreateTicketWork,
   ext_batch_ticket_work: handleExtBatchTicketWork,
   monthly_report_work: handleMonthlyReportWork,
+  weekly_report_work: handleWeeklyReportWork,
+  init_ticket_modal_work: handleInitTicketModalWork,
+  init_batch_ticket_modal_work: handleInitBatchTicketModalWork,
 } satisfies WorkerHandlers;
 
 export const WORKER_TYPES: ReadonlySet<WorkerPayload['type']> = new Set(

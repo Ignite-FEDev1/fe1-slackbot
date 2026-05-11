@@ -6,7 +6,7 @@ import {
   summarizeThreadToTicket,
   SummarizeContext,
   TicketDraft,
-} from '../llm/groq';
+} from '../llm/summarize';
 import { fetchThreadMessages } from '../slack/thread';
 import { Command } from './types';
 
@@ -21,17 +21,22 @@ const isValidEstimate = (v: string) => ESTIMATE_PATTERN.test(v.trim());
 // 날짜 검증 (YYYY-MM-DD)
 const isValidDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
 
-interface PrivateMetadata {
+export interface CreateTicketPrivateMetadata {
   channel: string;
   threadTs: string;
   triggerUserId: string;
 }
 
+// 별칭 (기존 코드 호환)
+type PrivateMetadata = CreateTicketPrivateMetadata;
+
+export const CREATE_TICKET_VIEW_ID = 'create_ticket_modal';
+
 /**
  * Slack user ID → display name 조회.
  * LLM 컨텍스트에 "담당자: {이름}" 으로 넘기기 위함.
  */
-const getSlackDisplayName = async (
+export const getSlackDisplayName = async (
   client: WebClient,
   userId: string
 ): Promise<string> => {
@@ -47,8 +52,8 @@ const getSlackDisplayName = async (
   }
 };
 
-interface BuildModalParams {
-  metadata: PrivateMetadata;
+export interface CreateTicketBuildModalParams {
+  metadata: CreateTicketPrivateMetadata;
   epics: JiraEpic[];
   draft: TicketDraft | null;
   assigneeUserId: string;
@@ -59,7 +64,9 @@ interface BuildModalParams {
   estimate?: string;
 }
 
-const buildModalView = ({
+type BuildModalParams = CreateTicketBuildModalParams;
+
+export const buildCreateTicketModalView = ({
   metadata,
   epics,
   draft,
@@ -260,6 +267,8 @@ export const createTicketCommand: Command = {
 
   register(app: App) {
     // 1) 메시지 숏컷: 쓰레드에서 메시지 우클릭 → "티켓 만들기"
+    //    - 로딩 모달만 즉시 오픈하고 나머지(쓰레드 fetch + LLM + 모달 update) 는 worker 위임.
+    //    - 동기 흐름이면 LLM latency 가 API Gateway 30초 한도에 걸려 모달이 깨질 수 있다.
     app.shortcut(SHORTCUT_ID, async ({ shortcut, ack, client }) => {
       await ack();
 
@@ -268,7 +277,7 @@ export const createTicketCommand: Command = {
       const threadTs = s.message.thread_ts || s.message.ts;
       const triggerUserId = s.user.id;
 
-      // 로딩 모달 즉시 오픈 (3초 내 필수)
+      // 로딩 모달 즉시 오픈 (trigger_id 3초 한도)
       const loading = await client.views.open({
         trigger_id: s.trigger_id,
         view: {
@@ -281,62 +290,52 @@ export const createTicketCommand: Command = {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '⏳ 쓰레드를 읽고 Groq 로 요약 중입니다...',
+                text: '⏳ 쓰레드를 읽고 LLM 으로 요약 중입니다...',
               },
             },
           ],
         },
       });
 
+      const viewId = loading.view?.id;
+      if (!viewId) {
+        console.error('[createTicket] views.open 응답에 view.id 없음');
+        return;
+      }
+
+      // worker 에 위임 — fetch + LLM + views.update 수행
       try {
-        // 쓰레드 + 에픽 + 호출자 이름 병렬 조회
-        const [messages, epics, triggerName] = await Promise.all([
-          fetchThreadMessages(client, channel, threadTs),
-          getActiveEpics(),
-          getSlackDisplayName(client, triggerUserId),
-        ]);
-
-        // 초기 요약은 호출자를 담당자로 가정
-        const draft = await summarizeThreadToTicket(messages, {
-          assigneeName: triggerName,
-        });
-
-        const metadata: PrivateMetadata = {
+        await invokeWorker({
+          type: 'init_ticket_modal_work',
+          viewId,
           channel,
           threadTs,
           triggerUserId,
-        };
-
-        await client.views.update({
-          view_id: loading.view?.id,
-          view: buildModalView({
-            metadata,
-            epics,
-            draft,
-            assigneeUserId: triggerUserId,
-            instructions: '',
-          }),
         });
       } catch (e) {
-        console.error('[createTicket] 모달 준비 실패:', e);
-        await client.views.update({
-          view_id: loading.view?.id,
-          view: {
-            type: 'modal',
-            callback_id: VIEW_ID + '_error',
-            title: { type: 'plain_text', text: '티켓 만들기' },
-            close: { type: 'plain_text', text: '닫기' },
-            blocks: [
-              {
-                type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: '❌ 쓰레드를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.',
+        console.error('[createTicket] invokeWorker 실패:', e);
+        try {
+          await client.views.update({
+            view_id: viewId,
+            view: {
+              type: 'modal',
+              callback_id: VIEW_ID + '_error',
+              title: { type: 'plain_text', text: '티켓 만들기' },
+              close: { type: 'plain_text', text: '닫기' },
+              blocks: [
+                {
+                  type: 'section',
+                  text: {
+                    type: 'mrkdwn',
+                    text: '❌ Worker 호출 실패. 잠시 후 다시 시도해주세요.',
+                  },
                 },
-              },
-            ],
-          },
-        });
+              ],
+            },
+          });
+        } catch {
+          /* ignore */
+        }
       }
     });
 

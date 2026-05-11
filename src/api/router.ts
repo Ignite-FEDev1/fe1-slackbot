@@ -1,5 +1,5 @@
 import { getActiveEpics } from '../jira/epics';
-import { summarizeTextToTicket, TextSummarizeContext } from '../llm/groq';
+import { summarizeTextToTicket, TextSummarizeContext } from '../llm/summarize';
 import { invokeWorker } from '../invokeWorker';
 import { SLACK_JIRA_USER_MAP, SLACK_USER_NAMES } from '../constant';
 

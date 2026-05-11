@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
+import axios from 'axios';
 
-// 기본 모델: 한국어 nuance + 구조화 추출 정확도가 높은 Sonnet 4.6
-export const CLAUDE_MODEL = 'claude-sonnet-4-6';
-export const CLAUDE_MODEL_HAIKU = 'claude-haiku-4-5-20251001';
-export const CLAUDE_MODEL_OPUS = 'claude-opus-4-7';
+// 모델 별칭 (벤더/버전 변경 시 이 상수만 갱신).
+// 현재 매핑: 한국어 nuance + 구조화 추출 정확도 기준 Sonnet 4.6 / Haiku 4.5 / Opus 4.7.
+export const MODEL_DEFAULT = 'claude-sonnet-4-6';
+export const MODEL_FAST = 'claude-haiku-4-5-20251001';
+export const MODEL_PREMIUM = 'claude-opus-4-7';
 
 let _client: Anthropic | null = null;
 const getClient = (): Anthropic => {
@@ -15,7 +17,7 @@ const getClient = (): Anthropic => {
   return _client;
 };
 
-export interface ClaudeOptions {
+export interface LlmOptions {
   model?: string;
   maxTokens?: number;
   /** system 프롬프트를 prompt cache 에 올림 (5분 TTL, 입력 90% 할인) */
@@ -174,17 +176,17 @@ const scanBalancedObject = (s: string): string | null => {
 };
 
 /**
- * Anthropic Messages API 호출.
- * - 입력: system + user 텍스트 (Groq 의 callGroq 와 시그니처 호환)
+ * LLM 호출 (현 구현체: Anthropic Messages API).
+ * - 입력: system + user 텍스트
  * - 출력: 응답 텍스트에서 추출한 JSON 문자열 또는 null
  * - 일부 신형 모델(Sonnet 4.6 등)이 assistant prefill 을 거부하므로 프리필 미사용
  */
-export const callClaude = async (
+export const callLlm = async (
   systemPrompt: string,
   userPrompt: string,
-  options: ClaudeOptions = {}
+  options: LlmOptions = {}
 ): Promise<string | null> => {
-  const model = options.model ?? CLAUDE_MODEL;
+  const model = options.model ?? MODEL_DEFAULT;
   const maxTokens = options.maxTokens ?? 4096;
   const cacheSystem = options.cacheSystem ?? true;
 
@@ -215,22 +217,90 @@ export const callClaude = async (
     const usage = res.usage;
     if (usage) {
       console.log(
-        `[llm] claude usage (model=${model}): input=${usage.input_tokens}, output=${usage.output_tokens}, cache_read=${usage.cache_read_input_tokens ?? 0}, cache_create=${usage.cache_creation_input_tokens ?? 0}`
+        `[llm] usage (model=${model}): input=${usage.input_tokens}, output=${usage.output_tokens}, cache_read=${usage.cache_read_input_tokens ?? 0}, cache_create=${usage.cache_creation_input_tokens ?? 0}`
       );
     }
 
     const block = res.content.find((b) => b.type === 'text');
     if (!block || block.type !== 'text') {
-      console.error('[llm] claude 응답에 text 블록 없음');
+      console.error('[llm] 응답에 text 블록 없음');
       return null;
     }
 
     return extractJsonObject(block.text);
   } catch (e: any) {
     console.error(
-      `[llm] Anthropic 호출 실패 (model=${model}):`,
+      `[llm] LLM 호출 실패 (model=${model}):`,
       e?.status,
       e?.message || e
+    );
+    return null;
+  }
+};
+
+// ─── Groq (OpenAI 호환 REST) — 빠른 응답이 중요한 동기 경로용 ─────
+//
+// 티켓 만들기/일괄 티켓 만들기처럼 슬랙 모달이 LLM 응답을 기다리는 동기 흐름은
+// API Gateway 30초 한도 안에 모달 update 까지 끝나야 한다.
+// Anthropic Sonnet 보다 Groq Llama 가 응답 latency 가 짧아 이 경로에 사용.
+
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+interface GroqResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+/**
+ * Groq Chat Completions 호출. JSON 모드로 요청한다.
+ * 반환은 JSON 문자열 (본문) — 호출자가 JSON.parse 한다.
+ */
+export const callGroq = async (
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string | null> => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    console.error('[llm] GROQ_API_KEY 미설정');
+    return null;
+  }
+  try {
+    const res = await axios.post<GroqResponse>(
+      GROQ_URL,
+      {
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 20000,
+      }
+    );
+    const u = res.data.usage;
+    if (u) {
+      console.log(
+        `[llm] groq usage (model=${GROQ_MODEL}): prompt=${u.prompt_tokens ?? 0}, completion=${u.completion_tokens ?? 0}, total=${u.total_tokens ?? 0}`
+      );
+    }
+    return res.data.choices?.[0]?.message?.content ?? null;
+  } catch (e: any) {
+    console.error(
+      '[llm] Groq 호출 실패:',
+      e?.response?.status,
+      e?.response?.data || e?.message
     );
     return null;
   }

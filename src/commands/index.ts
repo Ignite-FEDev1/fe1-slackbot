@@ -8,6 +8,7 @@ import { buildHelpCommand } from './help';
 import { monthlyReportCommand } from './monthlyReport';
 import { pingCommand } from './ping';
 import { weeklyCommand } from './weekly';
+import { weeklyReportCommand } from './weeklyReport';
 import { Command } from './types';
 
 /**
@@ -21,6 +22,7 @@ export const commands: Command[] = [
   deployRoomCommand,
   deploysCommand,
   weeklyCommand,
+  weeklyReportCommand,
   dailySummaryCommand,
   monthlyReportCommand,
   pingCommand,

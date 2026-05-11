@@ -1,11 +1,13 @@
-// Groq 에서 Anthropic Claude 로 마이그레이션됨 (2026-04).
-// 파일명은 호환을 위해 유지. 실제 LLM 호출은 src/llm/anthropic.ts 의 callClaude 로 위임.
-import { callClaude } from './anthropic';
-
-const callGroq = callClaude;
+// 도메인별 요약 프롬프트 모음. 실제 LLM 호출은 src/llm/client.ts 로 위임.
+//
+// 호출자별 LLM 선택:
+// - 티켓 생성/배치/텍스트(Chrome Ext) → callLlm + MODEL_FAST (Haiku): 짧은 추출이라 Haiku 충분, latency 도 양호.
+//   호출 경로는 worker 비동기 (init_ticket_modal_work) 라 30초 타임아웃 무관.
+// - daily/weekly/monthly 요약 → callLlm + MODEL_DEFAULT (Sonnet): 품질 우선.
+import { callLlm, MODEL_FAST } from './client';
 
 /**
- * Groq 응답 JSON 을 파싱하여 TicketDraft 로 반환.
+ * LLM 응답 JSON 을 파싱하여 TicketDraft 로 반환.
  * 모든 요약 함수가 공통으로 사용한다.
  */
 const parseTicketDraft = (raw: string | null, tag: string): TicketDraft | null => {
@@ -19,7 +21,7 @@ const parseTicketDraft = (raw: string | null, tag: string): TicketDraft | null =
       return { title: parsed.title, description: parsed.description };
     }
   } catch (e) {
-    console.error(`[llm] Groq (${tag}) 응답 JSON 파싱 실패:`, raw);
+    console.error(`[llm] (${tag}) 응답 JSON 파싱 실패:`, raw);
   }
   return null;
 };
@@ -124,7 +126,10 @@ ${RESPONSE_FORMAT}
 ${conversation}
 </쓰레드>`;
 
-  return parseTicketDraft(await callGroq(system, user), 'thread');
+  return parseTicketDraft(
+    await callLlm(system, user, { model: MODEL_FAST }),
+    'thread'
+  );
 };
 
 export interface BatchSummarizeContext {
@@ -177,7 +182,10 @@ ${RESPONSE_FORMAT}`;
 ${conversation}
 </쓰레드>`;
 
-  return parseTicketDraft(await callGroq(system, user), 'batch');
+  return parseTicketDraft(
+    await callLlm(system, user, { model: MODEL_FAST }),
+    'batch'
+  );
 };
 
 // ─── 텍스트 기반 요약 (Chrome Extension 등) ───────────────────────
@@ -230,7 +238,10 @@ ${RESPONSE_FORMAT}
 ${text}
 </선택한 텍스트>`;
 
-  return parseTicketDraft(await callGroq(system, user), 'text');
+  return parseTicketDraft(
+    await callLlm(system, user, { model: MODEL_FAST }),
+    'text'
+  );
 };
 
 // ─── 데일리 스크럼 "한 일" 추출 (위클리 문서용) ───────────────────
@@ -317,9 +328,9 @@ ${fewShotOutput}
 ${rawText}
 </실제 입력>`;
 
-  const raw = await callGroq(system, userPrompt);
+  const raw = await callLlm(system, userPrompt);
   if (!raw) {
-    console.error('[llm] daily-summary callGroq 가 null 반환 (네트워크/API 에러)');
+    console.error('[llm] daily-summary callLlm 가 null 반환 (네트워크/API 에러)');
     return null;
   }
   console.log('[llm] daily-summary raw 응답 (앞 500자):', raw.slice(0, 500));
@@ -581,9 +592,9 @@ ${metaBlock}
 ${rawText}
 </실제 입력>`;
 
-  const raw = await callGroq(MONTHLY_SYSTEM_PROMPT, userPrompt, { maxTokens: 16384 });
+  const raw = await callLlm(MONTHLY_SYSTEM_PROMPT, userPrompt, { maxTokens: 16384 });
   if (!raw) {
-    console.error('[llm] monthly-report callGroq 가 null 반환');
+    console.error('[llm] monthly-report callLlm 가 null 반환');
     return null;
   }
   console.log('[llm] monthly-report raw 응답 (앞 800자):', raw.slice(0, 800));
@@ -676,11 +687,11 @@ export const summarizeMonthlyJiraExecution = async (
 ${rawTicketsBlock}
 </실제 입력>`;
 
-  const raw = await callGroq(EXECUTION_SYSTEM_PROMPT, userPrompt, {
+  const raw = await callLlm(EXECUTION_SYSTEM_PROMPT, userPrompt, {
     maxTokens: 4096,
   });
   if (!raw) {
-    console.error('[llm] monthly-execution callGroq null 반환');
+    console.error('[llm] monthly-execution callLlm null 반환');
     return null;
   }
   console.log('[llm] monthly-execution raw 응답 (앞 500자):', raw.slice(0, 500));
@@ -691,6 +702,163 @@ ${rawTicketsBlock}
     return null;
   } catch (e) {
     console.error('[llm] monthly-execution JSON 파싱 실패:', raw);
+    return null;
+  }
+};
+
+// ─── 위클리 리포트 (한 일 / 할 일 / 이슈·공유 통합 1회 호출) ────────
+
+export interface WeeklyReportSummary {
+  done: string; // # 한 일 본문 (마크다운)
+  todo: string; // # 할 일 본문
+  issues: string; // # 이슈/공유 본문
+}
+
+const WEEKLY_FEW_SHOT_INPUT = `<DAILY_SCRUM 본인 댓글 (5개 쓰레드, 8건)>
+[2026-04-28 (화) 08:23 ts=1] 할 일
+
+그룹웨어
+4/30 정기배포 QA 대응
+블랙덕 취약점 high 건 대응
+
+CPO
+4/30 정기배포 QA 대응
+[BO] 메인 페이지 관리 가이드 문구 변경
+
+[2026-04-28 (화) 19:52 ts=2] 한 일
+
+그룹웨어
+4/30 정기배포 QA 대응
+블랙덕 취약점 high 건 - release/260430 머지 완료
+Froala Editor 라이선스 키 - gitlab CI 변수로 변경
+
+CPO
+4/30 정기배포 QA 대응
+[파트너웹] 400 에러 다건 발생 장애 - 교차검증
+
+[2026-04-29 (수) 08:30 ts=3] 할 일
+
+그룹웨어
+licenses.json README 보강
+
+[2026-04-29 (수) 20:11 ts=4] 한일
+
+그룹웨어
+licenses.json, git submodule force README 설명 보강
+블랙덕 스캔 슬랙 알림 시간차 원인 파악
+</DAILY_SCRUM>
+
+<JIRA 다음 주 진행 본인 FEHG 티켓 (3건)>
+- [FEHG-3148] 그룹공지 개선 요청 — status: To Do · epic: 그룹웨어 운영 개선 · 2026-05-04 ~ 2026-05-08
+- [FEHG-3151] [파트너웹] eslint -> biome 마이그레이션 — status: In Progress · epic: CPO 인프라 · 2026-05-04 ~ 2026-05-15
+- [FEHG-3160] 블랙덕 취약점 추가 검출 high 3건 대응 — status: To Do · 2026-05-04 ~ 2026-05-06
+</JIRA>
+
+<SLACK 본인 메시지 (활동 채널, 4건)>
+[2026-04-29 09:42 #fe1-grouping] 멀티테넌트 전개 방식 관련, 초기 세팅을 슬랙에 공유드렸습니다. 별도 리뷰가 필요한지 문의드립니다. https://ignite0830.slack.com/archives/.../p1
+[2026-04-29 14:10 #fe1] 슬랙봇 같이 외부 네트워크에서 동작하는 SaaS 를 위해 팀당 매월 $20~$50 정도 anthropic 토큰 지원 불가할까요? /fe1 monthly-report 결과물 품질 좋습니다. https://ignite0830.slack.com/archives/.../p2
+[2026-04-30 11:05 #fe1] ㅇㅋ 확인했습니다.
+[2026-04-30 18:22 #fe1-grouping] [개발처리] 게시판 에디터 외부 이미지 복사-붙여넣기 시 autoway 2.0 이미지 3.0 리소스 전환 — 유승범 책임 쪽에 두레이 발행/팀즈 리마인드했으나 별도 리액션 없는 상태입니다. https://ignite0830.slack.com/archives/.../p4
+</SLACK>`;
+
+const WEEKLY_FEW_SHOT_OUTPUT = `{"done":"**그룹웨어**\\n- 4/30 정기배포 QA 대응\\n  - 블랙덕 취약점 high 건 release/260430 머지\\n  - Froala Editor 라이선스 키 gitlab CI 변수로 변경\\n- licenses.json, git submodule force README 설명 보강\\n- 블랙덕 스캔 슬랙 알림 시간차 원인 파악\\n\\n**CPO**\\n- 4/30 정기배포 QA 대응\\n  - [파트너웹] 400 에러 다건 발생 장애 교차검증","todo":"**그룹웨어 운영 개선**\\n- [FEHG-3148] 그룹공지 개선 요청 (5/4~5/8)\\n\\n**CPO 인프라**\\n- [FEHG-3151] [파트너웹] eslint → biome 마이그레이션 (5/4~5/15)\\n\\n**기타**\\n- [FEHG-3160] 블랙덕 취약점 추가 검출 high 3건 대응 (5/4~5/6)","issues":"**4/29**\\n- 멀티테넌트 전개 초기 세팅 공유 — 별도 리뷰 필요 여부 문의 (링크)\\n- [제안] 팀당 월 $20~$50 anthropic 토큰 지원 요청. monthly-report 결과 품질 근거 (링크)\\n\\n**4/30**\\n- [개발처리] 게시판 에디터 이미지 리소스 전환 — 유승범 책임 쪽 두레이 발행/팀즈 리마인드, 별도 리액션 없음 (링크)"}`;
+
+const WEEKLY_SYSTEM_PROMPT = `너는 FE1팀 위클리 리포트 작성 보조다.
+한 사용자의 한 주간 활동을 3개 소스에서 받아 위클리 문서의 **한 일 / 할 일 / 이슈·공유** 3개 컬럼으로 정리한다.
+
+## 입력 형식
+세 개의 라벨 블록이 있다 (일부는 비어있을 수 있다):
+- <DAILY_SCRUM>: 데일리 스크럼 채널의 본인 댓글 raw (월~금, 시간순). 한 사람이 같은 날 "할 일" 댓글과 "한 일" 댓글을 따로 남긴다. 오타·변형(한일/헌일/한 일/할 일/할일 등)이 있을 수 있다.
+- <JIRA>: 본인이 다음 주 진행 예정인 FEHG 티켓 목록.
+- <SLACK>: 본인이 활동 채널에 작성한 메시지(한 주 동안). 영구링크 포함.
+
+## 출력 컬럼별 매핑/규칙
+
+### done (한 일)
+- DAILY_SCRUM 댓글 중 "한 일" 의도만 추출. "할 일" 댓글의 내용은 무시.
+- 분류는 라벨 텍스트가 아니라 **의미** 기준 (오타/변형 모두 허용).
+- 회의·일정 (예: "11:00 ~ FE1 데일리", "13:00 ~ 점심", "15:30 ~ 주간회의") 은 제외.
+- 같은 작업이 여러 날 반복되면 1번만 정리하되, 가장 구체적인 표현으로.
+- 입력에 프로젝트 헤더(그룹웨어 / CPO / HB / 통합딜러포탈 / 기타)가 있으면 그대로 그룹핑. 없으면 LLM 이 판단.
+- 출력 포맷: \`**프로젝트명**\\n- 작업\\n  - 세부\` 형태 계층 불릿. 입력에 세부가 있으면 살림.
+
+### todo (할 일)
+- JIRA 티켓을 epic 별로 그룹핑. epic 이 없는 티켓은 "기타" 로.
+- 항목 포맷: \`- [FEHG-XXX] 티켓 제목 (시작일~종료일)\` (날짜는 짧게 M/D 형태).
+- 가공 최소화 — 티켓 제목 그대로 살림.
+- 같은 epic 의 티켓은 epic 헤더 \`**에픽 이름**\` 아래 묶기.
+
+### issues (이슈/공유)
+- SLACK 본인 메시지 중 이슈성/공유성/제안성/문의/회신 long-form 만 추출.
+- 잡담·짧은 답변(예: "ㅇㅋ", "확인했습니다", "감사합니다") 제외.
+- 일자별 그룹핑: \`**M/D**\\n- 한 줄 요약 (링크)\` 형태.
+- 영구링크는 가능한 한 보존 (위클리 문서에서 클릭 가능해야 함).
+- 가공은 최소 — 본문 핵심만 1~2문장으로 요약.
+
+## 톤
+${STYLE_RULES}
+
+## 응답 형식 (JSON)
+반드시 아래 JSON 으로만 응답:
+{
+  "done": string,    // 마크다운
+  "todo": string,    // 마크다운
+  "issues": string   // 마크다운
+}
+
+해당 컬럼의 추출 가능한 데이터가 없으면 그 필드는 \`"_(데이터 없음)_"\` 으로.
+
+## 예시
+
+<예시 입력>
+${WEEKLY_FEW_SHOT_INPUT}
+</예시 입력>
+
+<예시 출력>
+${WEEKLY_FEW_SHOT_OUTPUT}
+</예시 출력>`;
+
+/**
+ * 한 사용자의 한 주간 데일리 스크럼/Jira/Slack 데이터를 받아
+ * 위클리 리포트 3컬럼(한 일/할 일/이슈·공유) 마크다운으로 정리.
+ */
+export const summarizeWeeklyReport = async (
+  inputBlock: string,
+  userName: string,
+  doneRange: { from: string; to: string },
+  todoRange: { from: string; to: string }
+): Promise<WeeklyReportSummary | null> => {
+  if (!inputBlock.trim()) return null;
+
+  const userPrompt = `<대상>
+- 작성자: ${userName}
+- 한 일 기간 (이번 주): ${doneRange.from} ~ ${doneRange.to}
+- 할 일 기간 (다음 주): ${todoRange.from} ~ ${todoRange.to}
+</대상>
+
+<실제 입력>
+${inputBlock}
+</실제 입력>`;
+
+  const raw = await callLlm(WEEKLY_SYSTEM_PROMPT, userPrompt, { maxTokens: 8192 });
+  if (!raw) {
+    console.error('[llm] weekly-report callLlm 가 null 반환');
+    return null;
+  }
+  console.log('[llm] weekly-report raw 응답 (앞 800자):', raw.slice(0, 800));
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed?.done === 'string' &&
+      typeof parsed?.todo === 'string' &&
+      typeof parsed?.issues === 'string'
+    ) {
+      return { done: parsed.done, todo: parsed.todo, issues: parsed.issues };
+    }
+    console.error('[llm] weekly-report 응답 스키마 불일치:', Object.keys(parsed ?? {}));
+    return null;
+  } catch (e) {
+    console.error('[llm] weekly-report JSON 파싱 실패:', raw);
     return null;
   }
 };

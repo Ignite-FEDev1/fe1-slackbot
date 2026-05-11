@@ -1,5 +1,5 @@
 import { WebClient } from '@slack/web-api';
-import { ThreadMessage } from '../llm/groq';
+import { ThreadMessage } from '../llm/summarize';
 
 /**
  * Slack 쓰레드의 모든 메시지를 가져와서 LLM 에 넘길 수 있는 형태로 변환한다.

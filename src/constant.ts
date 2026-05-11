@@ -18,6 +18,9 @@ export const SLACK_JIRA_USER_MAP: Record<string, string> = {
   // U061LC4V0BT: '712020:96cf8ab5-20ff-4d6b-960d-5d38b7a46a39', // 이미진
 };
 
+// weekly-report 데일리 스크럼 쓰레드가 올라오는 채널 (Slackbot 리마인더 매일 08:00)
+export const DAILY_SCRUM_CHANNEL = 'C04D0SD0S3B';
+
 // monthly-report 분석 대상 채널 (FE1 활동 채널)
 export const MONTHLY_REPORT_CHANNELS: string[] = [
   'C04G5SZB010',
