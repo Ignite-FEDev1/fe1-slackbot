@@ -47,11 +47,11 @@ const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
  * Slack 쓰레드 URL 생성.
- * https://app.slack.com/client 기반 범용 딥링크 (워크스페이스 도메인 불필요)
+ * slack.com/archives 기반 범용 딥링크 (워크스페이스 도메인 불필요)
  */
 const getSlackThreadUrl = (channel: string, threadTs: string): string => {
   const tsNoDot = threadTs.replace('.', '');
-  return `https://app.slack.com/client/archives/${channel}/p${tsNoDot}`;
+  return `https://slack.com/archives/${channel}/p${tsNoDot}`;
 };
 
 export interface CreateTicketWorkerPayload {
