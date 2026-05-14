@@ -51,7 +51,7 @@ const client = new WebClient(process.env.SLACK_BOT_TOKEN);
  */
 const getSlackThreadUrl = (channel: string, threadTs: string): string => {
   const tsNoDot = threadTs.replace('.', '');
-  return `https://slack.com/archives/${channel}/p${tsNoDot}`;
+  return `https://ignite0830.slack.com/archives/${channel}/p${tsNoDot}`;
 };
 
 export interface CreateTicketWorkerPayload {
@@ -192,7 +192,7 @@ export type WorkerPayload =
 
 type WorkerHandlers = {
   [K in WorkerPayload['type']]: (
-    p: Extract<WorkerPayload, { type: K }>
+    p: Extract<WorkerPayload, { type: K }>,
   ) => Promise<void>;
 };
 
@@ -214,7 +214,10 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
         };
       }
     } catch (e) {
-      console.error('[worker] Supabase 인증 조회 실패, 기본 인증으로 fallback:', e);
+      console.error(
+        '[worker] Supabase 인증 조회 실패, 기본 인증으로 fallback:',
+        e,
+      );
     }
   }
 
@@ -237,7 +240,9 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
 
   if (created) {
     const creatorMention = p.triggerUserId ? `<@${p.triggerUserId}>` : '누군가';
-    const assigneeMention = p.assigneeSlackId ? `<@${p.assigneeSlackId}>` : '미지정';
+    const assigneeMention = p.assigneeSlackId
+      ? `<@${p.assigneeSlackId}>`
+      : '미지정';
 
     // 시작일/종료일/추정치 정보 조합
     const detailParts: string[] = [];
@@ -251,7 +256,9 @@ const handleCreateTicketWork = async (p: CreateTicketWorkerPayload) => {
     if (p.estimate) {
       detailParts.push(`⏱ 추정: ${p.estimate}`);
     }
-    const detailLine = detailParts.length ? `\n${detailParts.join('  ·  ')}` : '';
+    const detailLine = detailParts.length
+      ? `\n${detailParts.join('  ·  ')}`
+      : '';
 
     await client.chat.postMessage({
       channel: p.channel,
@@ -344,7 +351,7 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
         jiraAuth,
       });
       return { slackUserId, created, missingMapping: false };
-    })
+    }),
   );
 
   if (!p.channel || !p.threadTs) return;
@@ -352,13 +359,15 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
   const creatorMention = p.triggerUserId ? `<@${p.triggerUserId}>` : '누군가';
   const successLines = results
     .filter((r) => r.created)
-    .map((r) => `• <@${r.slackUserId}> → <${r.created!.url}|${r.created!.key}>`);
+    .map(
+      (r) => `• <@${r.slackUserId}> → <${r.created!.url}|${r.created!.key}>`,
+    );
   const failureLines = results
     .filter((r) => !r.created)
     .map((r) =>
       r.missingMapping
         ? `• <@${r.slackUserId}> → ⚠️ Jira 매핑 없음 (SLACK_JIRA_USER_MAP 확인)`
-        : `• <@${r.slackUserId}> → ❌ 생성 실패`
+        : `• <@${r.slackUserId}> → ❌ 생성 실패`,
     );
 
   const successCount = successLines.length;
@@ -376,7 +385,9 @@ const handleBatchTicketWork = async (p: BatchTicketWorkerPayload) => {
   if (p.estimate) {
     batchDetailParts.push(`⏱ 추정: ${p.estimate}`);
   }
-  const batchDetailLine = batchDetailParts.length ? batchDetailParts.join('  ·  ') : '';
+  const batchDetailLine = batchDetailParts.length
+    ? batchDetailParts.join('  ·  ')
+    : '';
 
   const summaryText = [
     `*📦 배치 티켓 생성 결과*  ·  성공 ${successCount} / 실패 ${failCount}`,
@@ -430,7 +441,9 @@ const handleRegenerateSummary = async (p: RegenerateWorkerPayload) => {
         info.user?.profile?.display_name ||
         info.user?.real_name ||
         p.assigneeUserId;
-    } catch { /* fallback to userId */ }
+    } catch {
+      /* fallback to userId */
+    }
 
     const [messages, epics] = await Promise.all([
       fetchThreadMessages(client, p.channel, p.threadTs),
@@ -444,86 +457,168 @@ const handleRegenerateSummary = async (p: RegenerateWorkerPayload) => {
     const draft = await summarizeThreadToTicket(messages, ctx);
 
     const epicOptions = epics.slice(0, 100).map((e) => ({
-      text: { type: 'plain_text' as const, text: `${e.key} ${e.summary}`.slice(0, 75) },
+      text: {
+        type: 'plain_text' as const,
+        text: `${e.key} ${e.summary}`.slice(0, 75),
+      },
       value: e.key,
     }));
     const initialEpic =
-      p.selectedEpicKey && epicOptions.find((o) => o.value === p.selectedEpicKey)
+      p.selectedEpicKey &&
+      epicOptions.find((o) => o.value === p.selectedEpicKey)
         ? epicOptions.find((o) => o.value === p.selectedEpicKey)!
         : undefined;
 
-    const metadata = { channel: p.channel, threadTs: p.threadTs, triggerUserId: p.triggerUserId };
+    const metadata = {
+      channel: p.channel,
+      threadTs: p.threadTs,
+      triggerUserId: p.triggerUserId,
+    };
     const blocks: any[] = [];
 
     // 1. 담당자
     blocks.push({
-      type: 'input', block_id: 'assignee_block',
+      type: 'input',
+      block_id: 'assignee_block',
       label: { type: 'plain_text', text: '담당자' },
-      element: { type: 'users_select', action_id: 'assignee', initial_user: p.assigneeUserId },
+      element: {
+        type: 'users_select',
+        action_id: 'assignee',
+        initial_user: p.assigneeUserId,
+      },
     });
     // 2. 제목
     blocks.push({
-      type: 'input', block_id: 'title_block',
+      type: 'input',
+      block_id: 'title_block',
       label: { type: 'plain_text', text: '제목' },
-      element: { type: 'plain_text_input', action_id: 'title', initial_value: draft?.title ?? '', max_length: 250 },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'title',
+        initial_value: draft?.title ?? '',
+        max_length: 250,
+      },
     });
     // 3. 본문
     blocks.push({
-      type: 'input', block_id: 'description_block',
+      type: 'input',
+      block_id: 'description_block',
       label: { type: 'plain_text', text: '본문' },
-      element: { type: 'plain_text_input', action_id: 'description', multiline: true, initial_value: draft?.description ?? '' },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'description',
+        multiline: true,
+        initial_value: draft?.description ?? '',
+      },
     });
     // 4. 에픽
     if (epicOptions.length > 0) {
       blocks.push({
-        type: 'input', block_id: 'epic_block',
+        type: 'input',
+        block_id: 'epic_block',
         label: { type: 'plain_text', text: '상위 에픽' },
         element: {
-          type: 'static_select', action_id: 'epic',
+          type: 'static_select',
+          action_id: 'epic',
           placeholder: { type: 'plain_text', text: '에픽 선택' },
           options: epicOptions,
           ...(initialEpic ? { initial_option: initialEpic } : {}),
         },
       });
     } else {
-      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '⚠️ _진행중인 FEHG 에픽을 찾지 못했습니다._' } });
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '⚠️ _진행중인 FEHG 에픽을 찾지 못했습니다._',
+        },
+      });
     }
     // 5. 시작일
     blocks.push({
-      type: 'input', block_id: 'start_date_block', optional: true,
+      type: 'input',
+      block_id: 'start_date_block',
+      optional: true,
       label: { type: 'plain_text', text: '시작일' },
-      element: { type: 'datepicker', action_id: 'start_date', ...(p.startDate ? { initial_date: p.startDate } : {}), placeholder: { type: 'plain_text', text: '시작일 선택' } },
+      element: {
+        type: 'datepicker',
+        action_id: 'start_date',
+        ...(p.startDate ? { initial_date: p.startDate } : {}),
+        placeholder: { type: 'plain_text', text: '시작일 선택' },
+      },
     });
     // 6. 종료일
     blocks.push({
-      type: 'input', block_id: 'end_date_block', optional: true,
+      type: 'input',
+      block_id: 'end_date_block',
+      optional: true,
       label: { type: 'plain_text', text: '종료일' },
-      element: { type: 'datepicker', action_id: 'end_date', ...(p.endDate ? { initial_date: p.endDate } : {}), placeholder: { type: 'plain_text', text: '종료일 선택' } },
+      element: {
+        type: 'datepicker',
+        action_id: 'end_date',
+        ...(p.endDate ? { initial_date: p.endDate } : {}),
+        placeholder: { type: 'plain_text', text: '종료일 선택' },
+      },
     });
     // 7. 추정치
     blocks.push({
-      type: 'input', block_id: 'estimate_block', optional: true,
+      type: 'input',
+      block_id: 'estimate_block',
+      optional: true,
       label: { type: 'plain_text', text: '최초추정치' },
-      hint: { type: 'plain_text', text: '형식: 숫자 + 단위 (d=일, w=주, h=시간, m=분) 예: 3d, 1w, 1.5h' },
-      element: { type: 'plain_text_input', action_id: 'estimate', initial_value: p.estimate ?? '', placeholder: { type: 'plain_text', text: '예: 3d' } },
+      hint: {
+        type: 'plain_text',
+        text: '형식: 숫자 + 단위 (d=일, w=주, h=시간, m=분) 예: 3d, 1w, 1.5h',
+      },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'estimate',
+        initial_value: p.estimate ?? '',
+        placeholder: { type: 'plain_text', text: '예: 3d' },
+      },
     });
     // 8. 추가 지시사항
     blocks.push({
-      type: 'input', block_id: 'instructions_block', optional: true,
+      type: 'input',
+      block_id: 'instructions_block',
+      optional: true,
       label: { type: 'plain_text', text: '추가 지시사항 (선택)' },
-      hint: { type: 'plain_text', text: '예: "FE 작업만 추출", "김가빈이 해야 할 API 연동만"' },
-      element: { type: 'plain_text_input', action_id: 'instructions', multiline: true, initial_value: p.instructions },
+      hint: {
+        type: 'plain_text',
+        text: '예: "FE 작업만 추출", "김가빈이 해야 할 API 연동만"',
+      },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'instructions',
+        multiline: true,
+        initial_value: p.instructions,
+      },
     });
     // 9. 재요약 버튼
     blocks.push({
-      type: 'actions', block_id: 'regenerate_block',
-      elements: [{ type: 'button', action_id: 'regenerate_summary', text: { type: 'plain_text', text: '🔄 담당자/지시사항 반영해 다시 요약' } }],
+      type: 'actions',
+      block_id: 'regenerate_block',
+      elements: [
+        {
+          type: 'button',
+          action_id: 'regenerate_summary',
+          text: {
+            type: 'plain_text',
+            text: '🔄 담당자/지시사항 반영해 다시 요약',
+          },
+        },
+      ],
     });
     blocks.push({
       type: 'context',
-      elements: [{ type: 'mrkdwn', text: draft
-        ? '✨ Groq 가 쓰레드 + 담당자/지시사항 기반으로 초안을 만들었습니다. 수정하거나 🔄 버튼으로 다시 요약할 수 있어요.'
-        : '⚠️ LLM 요약에 실패했습니다. 직접 입력하거나 🔄 버튼으로 다시 시도하세요.' }],
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: draft
+            ? '✨ Groq 가 쓰레드 + 담당자/지시사항 기반으로 초안을 만들었습니다. 수정하거나 🔄 버튼으로 다시 요약할 수 있어요.'
+            : '⚠️ LLM 요약에 실패했습니다. 직접 입력하거나 🔄 버튼으로 다시 시도하세요.',
+        },
+      ],
     });
 
     await client.views.update({
@@ -547,7 +642,7 @@ const handleRegenerateSummary = async (p: RegenerateWorkerPayload) => {
  * 배치 티켓 일괄 변경 worker
  */
 const handleBatchTicketBulkUpdateWork = async (
-  p: BatchTicketBulkUpdateWorkerPayload
+  p: BatchTicketBulkUpdateWorkerPayload,
 ) => {
   // Slack 쓰레드 링크를 description 에 재추가
   const threadUrl = getSlackThreadUrl(p.channel, p.threadTs);
@@ -566,16 +661,14 @@ const handleBatchTicketBulkUpdateWork = async (
         originalEstimate: p.estimate,
       });
       return { key, success };
-    })
+    }),
   );
 
   if (!p.channel || !p.threadTs) return;
 
   const successCount = results.filter((r) => r.success).length;
   const failCount = results.filter((r) => !r.success).length;
-  const creatorMention = p.triggerUserId
-    ? `<@${p.triggerUserId}>`
-    : '누군가';
+  const creatorMention = p.triggerUserId ? `<@${p.triggerUserId}>` : '누군가';
 
   const successKeys = results.filter((r) => r.success).map((r) => r.key);
   const failKeys = results.filter((r) => !r.success).map((r) => r.key);
@@ -596,9 +689,7 @@ const handleBatchTicketBulkUpdateWork = async (
     `*🔄 배치 티켓 일괄 변경 결과*  ·  성공 ${successCount} / 실패 ${failCount}`,
     changeParts.length ? changeParts.join('  ·  ') : '',
     '',
-    successKeys.length
-      ? `✅ ${successKeys.join(', ')}`
-      : '_성공한 티켓 없음_',
+    successKeys.length ? `✅ ${successKeys.join(', ')}` : '_성공한 티켓 없음_',
     failKeys.length ? `❌ 실패: ${failKeys.join(', ')}` : '',
   ]
     .filter(Boolean)
@@ -615,9 +706,7 @@ const handleBatchTicketBulkUpdateWork = async (
       },
       {
         type: 'context',
-        elements: [
-          { type: 'mrkdwn', text: `🧑‍💻 변경자: ${creatorMention}` },
-        ],
+        elements: [{ type: 'mrkdwn', text: `🧑‍💻 변경자: ${creatorMention}` }],
       },
     ],
   });
@@ -630,7 +719,9 @@ const FE1_WEB_BASE_URL = 'https://fe1-jira-sync.vercel.app';
 const VERCEL_BYPASS_SECRET = process.env.VERCEL_BYPASS_SECRET || '';
 
 const handleCreateDeployRoom = async (p: CreateDeployRoomWorkerPayload) => {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
   if (VERCEL_BYPASS_SECRET) {
     headers['x-vercel-protection-bypass'] = VERCEL_BYPASS_SECRET;
   }
@@ -719,7 +810,10 @@ const handleExtCreateTicketWork = async (p: ExtCreateTicketWorkerPayload) => {
         };
       }
     } catch (e) {
-      console.error('[worker] Supabase 인증 조회 실패, 기본 인증으로 fallback:', e);
+      console.error(
+        '[worker] Supabase 인증 조회 실패, 기본 인증으로 fallback:',
+        e,
+      );
     }
   }
 
@@ -744,7 +838,9 @@ const handleExtCreateTicketWork = async (p: ExtCreateTicketWorkerPayload) => {
   if (!notifyChannel) return;
 
   if (created) {
-    const assigneeMention = p.assigneeSlackId ? `<@${p.assigneeSlackId}>` : '미지정';
+    const assigneeMention = p.assigneeSlackId
+      ? `<@${p.assigneeSlackId}>`
+      : '미지정';
     const detailParts: string[] = [];
     if (p.startDate && p.endDate) {
       detailParts.push(`📅 ${p.startDate} → ${p.endDate}`);
@@ -756,7 +852,9 @@ const handleExtCreateTicketWork = async (p: ExtCreateTicketWorkerPayload) => {
     if (p.estimate) {
       detailParts.push(`⏱ 추정: ${p.estimate}`);
     }
-    const detailLine = detailParts.length ? `\n${detailParts.join('  ·  ')}` : '';
+    const detailLine = detailParts.length
+      ? `\n${detailParts.join('  ·  ')}`
+      : '';
 
     await client.chat.postMessage({
       channel: notifyChannel,
@@ -838,7 +936,7 @@ const handleExtBatchTicketWork = async (p: ExtBatchTicketWorkerPayload) => {
         jiraAuth,
       });
       return { slackUserId, created, missingMapping: false };
-    })
+    }),
   );
 
   const notifyChannel = process.env.EXT_NOTIFY_SLACK_CHANNEL;
@@ -846,13 +944,15 @@ const handleExtBatchTicketWork = async (p: ExtBatchTicketWorkerPayload) => {
 
   const successLines = results
     .filter((r) => r.created)
-    .map((r) => `• <@${r.slackUserId}> → <${r.created!.url}|${r.created!.key}>`);
+    .map(
+      (r) => `• <@${r.slackUserId}> → <${r.created!.url}|${r.created!.key}>`,
+    );
   const failureLines = results
     .filter((r) => !r.created)
     .map((r) =>
       r.missingMapping
         ? `• <@${r.slackUserId}> → ⚠️ Jira 매핑 없음`
-        : `• <@${r.slackUserId}> → ❌ 생성 실패`
+        : `• <@${r.slackUserId}> → ❌ 생성 실패`,
     );
 
   const successCount = successLines.length;
@@ -917,7 +1017,9 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
 
     const jiraAccountId = SLACK_JIRA_USER_MAP[p.triggerUserId];
 
-    const userInfoPromise = client.users.info({ user: p.triggerUserId }).catch(() => null);
+    const userInfoPromise = client.users
+      .info({ user: p.triggerUserId })
+      .catch(() => null);
     const credsPromise = jiraAccountId
       ? getJiraCredsByAccountId(jiraAccountId).catch(() => null)
       : Promise.resolve(null);
@@ -926,13 +1028,16 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
       client,
       MONTHLY_REPORT_CHANNELS,
       p.triggerUserId,
-      range
+      range,
     );
 
     const igniteCreds = await credsPromise;
     const igniteAuth =
       igniteCreds?.igniteJiraEmail && igniteCreds?.igniteJiraApiToken
-        ? { email: igniteCreds.igniteJiraEmail, token: igniteCreds.igniteJiraApiToken }
+        ? {
+            email: igniteCreds.igniteJiraEmail,
+            token: igniteCreds.igniteJiraApiToken,
+          }
         : null;
 
     const confluencePromise =
@@ -942,15 +1047,18 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     // ignite 인스턴스의 FEHG 프로젝트만 조회
     const jiraPromise =
       jiraAccountId && igniteAuth
-        ? fetchJiraMonthlyIssues('ignite', igniteAuth, jiraAccountId, range, ['FEHG'])
+        ? fetchJiraMonthlyIssues('ignite', igniteAuth, jiraAccountId, range, [
+            'FEHG',
+          ])
         : Promise.resolve([] as JiraIssue[]);
 
-    const [userInfo, slackResult, confluencePages, jiraIssues] = await Promise.all([
-      userInfoPromise,
-      slackPromise,
-      confluencePromise,
-      jiraPromise,
-    ]);
+    const [userInfo, slackResult, confluencePages, jiraIssues] =
+      await Promise.all([
+        userInfoPromise,
+        slackPromise,
+        confluencePromise,
+        jiraPromise,
+      ]);
 
     const userName =
       userInfo?.user?.profile?.display_name ||
@@ -961,7 +1069,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     const failedChannels = slackResult.failedChannels;
 
     console.log(
-      `[worker] monthly-report 수집 완료: slack=${slackMessages.length} (실패채널 ${failedChannels.length}), confluence=${confluencePages.length}, jira=${jiraIssues.length}`
+      `[worker] monthly-report 수집 완료: slack=${slackMessages.length} (실패채널 ${failedChannels.length}), confluence=${confluencePages.length}, jira=${jiraIssues.length}`,
     );
 
     const rawText = buildMonthlyInput(
@@ -969,7 +1077,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
       [],
       confluencePages,
       [],
-      MONTHLY_MAX_INPUT_CHARS
+      MONTHLY_MAX_INPUT_CHARS,
     );
 
     const jiraTicketsBlock = buildJiraTicketsBlock(jiraIssues);
@@ -994,7 +1102,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
               slackMessageCount: slackMessages.length,
               confluencePageCount: confluencePages.length,
               jiraIssueCount: jiraIssues.length,
-            }
+            },
           )
         : Promise.resolve(null),
       jiraTicketsBlock.trim()
@@ -1006,12 +1114,16 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     if (achievementSummary) {
       sections.push(`# 🏆 성과 (Q코드 기반)\n\n${achievementSummary}`);
     } else if (rawText.trim()) {
-      sections.push('# 🏆 성과 (Q코드 기반)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.');
+      sections.push(
+        '# 🏆 성과 (Q코드 기반)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.',
+      );
     }
     if (executionSummary) {
       sections.push(`# 📋 수행 (Jira 티켓)\n\n${executionSummary}`);
     } else if (jiraTicketsBlock.trim()) {
-      sections.push('# 📋 수행 (Jira 티켓)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.');
+      sections.push(
+        '# 📋 수행 (Jira 티켓)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.',
+      );
     }
     const finalSummary = sections.join('\n\n---\n\n');
 
@@ -1023,9 +1135,13 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     ];
     if (failedChannels.length > 0) {
       const formatted = failedChannels
-        .map((f) => `<#${f.channelId}> (${describeSlackChannelError(f.reason)})`)
+        .map(
+          (f) => `<#${f.channelId}> (${describeSlackChannelError(f.reason)})`,
+        )
         .join(', ');
-      statsParts.push(`⚠️ Slack ${failedChannels.length}채널 미수집: ${formatted}`);
+      statsParts.push(
+        `⚠️ Slack ${failedChannels.length}채널 미수집: ${formatted}`,
+      );
     }
     if (jiraAccountId && !igniteAuth) {
       statsParts.push('⚠️ Atlassian 인증 없음 → Confluence/Jira skip');
@@ -1137,7 +1253,7 @@ const buildMonthlyInput = (
   jira: JiraIssue[],
   confluence: ConfluencePage[],
   gitlab: GitlabMR[],
-  maxChars: number
+  maxChars: number,
 ): string => {
   const sections: string[] = [];
 
@@ -1145,7 +1261,10 @@ const buildMonthlyInput = (
   if (jira.length > 0) {
     const lines = jira
       .slice(0, 100)
-      .map((i) => `- [${i.key}] ${i.summary} (status: ${i.status}${i.resolved ? `, resolved: ${i.resolved}` : ''}) ${i.url}`)
+      .map(
+        (i) =>
+          `- [${i.key}] ${i.summary} (status: ${i.status}${i.resolved ? `, resolved: ${i.resolved}` : ''}) ${i.url}`,
+      )
       .join('\n');
     sections.push(`<JIRA 티켓 (${jira.length}건)>\n${lines}\n</JIRA>`);
   }
@@ -1154,9 +1273,14 @@ const buildMonthlyInput = (
   if (confluence.length > 0) {
     const lines = confluence
       .slice(0, 50)
-      .map((c) => `- [${c.type}] ${c.title} (space: ${c.spaceKey}, ${c.date}) ${c.url}`)
+      .map(
+        (c) =>
+          `- [${c.type}] ${c.title} (space: ${c.spaceKey}, ${c.date}) ${c.url}`,
+      )
       .join('\n');
-    sections.push(`<CONFLUENCE 페이지 (${confluence.length}건)>\n${lines}\n</CONFLUENCE>`);
+    sections.push(
+      `<CONFLUENCE 페이지 (${confluence.length}건)>\n${lines}\n</CONFLUENCE>`,
+    );
   }
 
   // GitLab 섹션
@@ -1165,7 +1289,7 @@ const buildMonthlyInput = (
       .slice(0, 100)
       .map(
         (m) =>
-          `- [${m.project}] !${m.iid} ${m.title} (state: ${m.state}${m.mergedAt ? `, merged: ${m.mergedAt}` : ''}) ${m.url}`
+          `- [${m.project}] !${m.iid} ${m.title} (state: ${m.state}${m.mergedAt ? `, merged: ${m.mergedAt}` : ''}) ${m.url}`,
       )
       .join('\n');
     sections.push(`<GITLAB MR (${gitlab.length}건)>\n${lines}\n</GITLAB>`);
@@ -1189,7 +1313,9 @@ const buildMonthlyInput = (
   }
 
   if (selected.size > 0) {
-    const sorted = [...slack].sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
+    const sorted = [...slack].sort(
+      (a, b) => parseFloat(a.ts) - parseFloat(b.ts),
+    );
     const slackText = sorted
       .filter((m) => selected.has(m.ts))
       .map(buildSlackBlock)
@@ -1198,7 +1324,9 @@ const buildMonthlyInput = (
       selected.size < slack.length
         ? `\n(전체 ${slack.length}건 중 ${selected.size}건만 분석)\n`
         : '';
-    sections.push(`<SLACK 메시지 (${selected.size}건)>${truncNote}\n${slackText}</SLACK>`);
+    sections.push(
+      `<SLACK 메시지 (${selected.size}건)>${truncNote}\n${slackText}</SLACK>`,
+    );
   }
 
   return sections.join('\n\n');
@@ -1210,9 +1338,7 @@ const WEEKLY_MAX_INPUT_CHARS = 80000;
 
 const buildWeeklyDailyScrumBlock = (replies: DailyScrumReply[]): string => {
   if (replies.length === 0) return '';
-  const lines = replies.map(
-    (r) => `[${r.dateLabel} ts=${r.ts}] ${r.text}`
-  );
+  const lines = replies.map((r) => `[${r.dateLabel} ts=${r.ts}] ${r.text}`);
   return `<DAILY_SCRUM 본인 댓글 (${replies.length}건, 시간순)>\n${lines.join('\n\n---\n\n')}\n</DAILY_SCRUM>`;
 };
 
@@ -1224,10 +1350,10 @@ const buildWeeklyJiraBlock = (issues: NextWeekJiraIssue[]): string => {
       i.startDate && i.dueDate
         ? ` · ${i.startDate} ~ ${i.dueDate}`
         : i.startDate
-        ? ` · 시작 ${i.startDate}`
-        : i.dueDate
-        ? ` · 종료 ${i.dueDate}`
-        : '';
+          ? ` · 시작 ${i.startDate}`
+          : i.dueDate
+            ? ` · 종료 ${i.dueDate}`
+            : '';
     return `- [${i.key}] ${i.summary} — status: ${i.status}${epicPart}${range}`;
   });
   return `<JIRA 다음 주 진행 본인 FEHG 티켓 (${issues.length}건)>\n${lines.join('\n')}\n</JIRA>`;
@@ -1235,7 +1361,7 @@ const buildWeeklyJiraBlock = (issues: NextWeekJiraIssue[]): string => {
 
 const buildWeeklySlackBlock = (
   msgs: SlackUserMessage[],
-  budget: number
+  budget: number,
 ): string => {
   if (msgs.length === 0) return '';
   const buildOne = (m: SlackUserMessage) =>
@@ -1251,7 +1377,10 @@ const buildWeeklySlackBlock = (
   }
   if (selected.size === 0) return '';
   const sorted = [...msgs].sort((a, b) => parseFloat(a.ts) - parseFloat(b.ts));
-  const text = sorted.filter((m) => selected.has(m.ts)).map(buildOne).join('');
+  const text = sorted
+    .filter((m) => selected.has(m.ts))
+    .map(buildOne)
+    .join('');
   const truncNote =
     selected.size < msgs.length
       ? ` (전체 ${msgs.length}건 중 ${selected.size}건만 분석)`
@@ -1295,7 +1424,9 @@ const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
 
     const jiraAccountId = SLACK_JIRA_USER_MAP[p.triggerUserId];
 
-    const userInfoPromise = client.users.info({ user: p.triggerUserId }).catch(() => null);
+    const userInfoPromise = client.users
+      .info({ user: p.triggerUserId })
+      .catch(() => null);
     const credsPromise = jiraAccountId
       ? getJiraCredsByAccountId(jiraAccountId).catch(() => null)
       : Promise.resolve(null);
@@ -1304,19 +1435,22 @@ const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
       client,
       DAILY_SCRUM_CHANNEL,
       p.triggerUserId,
-      doneRange
+      doneRange,
     );
     const slackPromise = fetchSlackMultiChannel(
       client,
       MONTHLY_REPORT_CHANNELS,
       p.triggerUserId,
-      doneRange
+      doneRange,
     );
 
     const igniteCreds = await credsPromise;
     const igniteAuth =
       igniteCreds?.igniteJiraEmail && igniteCreds?.igniteJiraApiToken
-        ? { email: igniteCreds.igniteJiraEmail, token: igniteCreds.igniteJiraApiToken }
+        ? {
+            email: igniteCreds.igniteJiraEmail,
+            token: igniteCreds.igniteJiraApiToken,
+          }
         : null;
 
     const jiraPromise =
@@ -1324,12 +1458,9 @@ const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
         ? fetchJiraNextWeekIssues(igniteAuth, jiraAccountId, todoRange)
         : Promise.resolve([] as NextWeekJiraIssue[]);
 
-    const [userInfo, dailyReplies, slackResult, jiraIssues] = await Promise.all([
-      userInfoPromise,
-      dailyScrumPromise,
-      slackPromise,
-      jiraPromise,
-    ]);
+    const [userInfo, dailyReplies, slackResult, jiraIssues] = await Promise.all(
+      [userInfoPromise, dailyScrumPromise, slackPromise, jiraPromise],
+    );
 
     const userName =
       userInfo?.user?.profile?.display_name ||
@@ -1337,17 +1468,19 @@ const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
       p.triggerUserId;
 
     console.log(
-      `[worker] weekly-report 수집 완료: daily=${dailyReplies.length}, slack=${slackResult.messages.length}, jira=${jiraIssues.length}`
+      `[worker] weekly-report 수집 완료: daily=${dailyReplies.length}, slack=${slackResult.messages.length}, jira=${jiraIssues.length}`,
     );
 
     const dailyBlock = buildWeeklyDailyScrumBlock(dailyReplies);
     const jiraBlock = buildWeeklyJiraBlock(jiraIssues);
     // SLACK 블록은 남은 char budget 내에서
-    const headerSize = (dailyBlock.length + jiraBlock.length) || 0;
+    const headerSize = dailyBlock.length + jiraBlock.length || 0;
     const slackBudget = Math.max(0, WEEKLY_MAX_INPUT_CHARS - headerSize - 1000);
     const slackBlock = buildWeeklySlackBlock(slackResult.messages, slackBudget);
 
-    const inputBlock = [dailyBlock, jiraBlock, slackBlock].filter(Boolean).join('\n\n');
+    const inputBlock = [dailyBlock, jiraBlock, slackBlock]
+      .filter(Boolean)
+      .join('\n\n');
 
     if (!inputBlock.trim()) {
       await client.chat.postMessage({
@@ -1361,7 +1494,7 @@ const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
       inputBlock,
       userName,
       { from: doneRange.monday, to: doneRange.friday },
-      { from: todoRange.monday, to: todoRange.friday }
+      { from: todoRange.monday, to: todoRange.friday },
     );
 
     if (!summary) {
@@ -1428,7 +1561,7 @@ const handleWeeklyReportWork = async (p: WeeklyReportWorkerPayload) => {
 const renderTicketModalError = async (
   viewId: string,
   callbackId: string,
-  title: string
+  title: string,
 ) => {
   try {
     await client.views.update({
@@ -1485,13 +1618,13 @@ const handleInitTicketModalWork = async (p: InitTicketModalWorkerPayload) => {
     await renderTicketModalError(
       p.viewId,
       'create_ticket_modal_error',
-      '티켓 만들기'
+      '티켓 만들기',
     );
   }
 };
 
 const handleInitBatchTicketModalWork = async (
-  p: InitBatchTicketModalWorkerPayload
+  p: InitBatchTicketModalWorkerPayload,
 ) => {
   try {
     const defaultUsers = getDefaultTeamSlackIds();
@@ -1523,7 +1656,7 @@ const handleInitBatchTicketModalWork = async (
     await renderTicketModalError(
       p.viewId,
       'create_batch_tickets_modal_error',
-      '배치 티켓 만들기'
+      '배치 티켓 만들기',
     );
   }
 };
@@ -1546,13 +1679,18 @@ const WORKER_HANDLERS = {
 } satisfies WorkerHandlers;
 
 export const WORKER_TYPES: ReadonlySet<WorkerPayload['type']> = new Set(
-  Object.keys(WORKER_HANDLERS) as WorkerPayload['type'][]
+  Object.keys(WORKER_HANDLERS) as WorkerPayload['type'][],
 );
 
 export const handleWorker = async (payload: WorkerPayload): Promise<void> => {
-  const handler = WORKER_HANDLERS[payload.type] as (p: WorkerPayload) => Promise<void>;
+  const handler = WORKER_HANDLERS[payload.type] as (
+    p: WorkerPayload,
+  ) => Promise<void>;
   if (!handler) {
-    console.error('[worker] 알 수 없는 payload type:', (payload as { type: string }).type);
+    console.error(
+      '[worker] 알 수 없는 payload type:',
+      (payload as { type: string }).type,
+    );
     return;
   }
   await handler(payload);
