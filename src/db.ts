@@ -39,6 +39,20 @@ export async function getJiraCredsByAccountId(
 }
 
 /**
+ * Supabase settings 테이블에서 단일 설정값을 조회한다.
+ * (예: 'hchat_api_key' — Chrome Extension 이 Lambda 통해 fetch)
+ */
+export async function getSetting(key: string): Promise<string | null> {
+  const { data } = await dbServer
+    .from('settings')
+    .select('value')
+    .eq('key', key)
+    .single();
+  if (!data) return null;
+  return data.value || null;
+}
+
+/**
  * Supabase users 테이블에서 HMG Jira 인증정보를 조회한다.
  */
 export async function getHmgCredsByAccountId(

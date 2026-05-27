@@ -36,6 +36,37 @@ const showStatus = (id, cls, text) => {
 
 const ESTIMATE_PATTERN = /^(\d+\.?\d*)(d|m|w|h)$/i;
 
+// ─── h-chat → Anthropic 폴백 ───────────────────────────────────
+// 1순위: 사내망 h-chat (Personal API Key 공용 사용)
+// 폴백: Lambda /api/summarize (Anthropic Haiku) — 외부망/사내 장애 시
+// 401/403 은 키 설정 문제이므로 폴백 안 하고 그대로 에러 노출
+const summarizeWithFallback = async (text, ctx) => {
+  try {
+    const draft = await summarizeViaHChat(text, ctx);
+    return { draft, source: 'hchat' };
+  } catch (e) {
+    if (e instanceof HChatError && e.isAuthError) throw e;
+    console.warn('[summarize] h-chat 실패, Anthropic 폴백:', e.message);
+    const res = await api('/api/summarize', {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        sourceUrl: ctx.sourceUrl,
+        assigneeName: ctx.assigneeName,
+        instructions: ctx.instructions,
+      }),
+    });
+    return { draft: res.draft, source: 'fallback', fallbackReason: e.message };
+  }
+};
+
+const showFallbackNotice = (show, reason) => {
+  const el = $('fallbackNotice');
+  if (!el) return;
+  el.style.display = show ? 'block' : 'none';
+  if (show && reason) el.title = reason;
+};
+
 // ─── 모드 전환 ─────────────────────────────────────────────────
 
 const switchMode = (mode) => {
@@ -112,16 +143,10 @@ const init = async () => {
   setFormDisabled(true);
 
   try {
-    const [epicsRes, membersRes, summarizeRes] = await Promise.all([
+    const [epicsRes, membersRes, summarizeResult] = await Promise.all([
       api('/api/epics'),
       api('/api/members'),
-      api('/api/summarize', {
-        method: 'POST',
-        body: JSON.stringify({
-          text: pendingTicket.text,
-          sourceUrl: pendingTicket.sourceUrl,
-        }),
-      }),
+      summarizeWithFallback(pendingTicket.text, { sourceUrl: pendingTicket.sourceUrl }),
     ]);
 
     // 에픽
@@ -147,10 +172,11 @@ const init = async () => {
     buildCheckboxes(membersData);
 
     // LLM 요약
-    if (summarizeRes.draft) {
-      $('title').value = summarizeRes.draft.title || '';
-      $('description').value = summarizeRes.draft.description || '';
+    if (summarizeResult.draft) {
+      $('title').value = summarizeResult.draft.title || '';
+      $('description').value = summarizeResult.draft.description || '';
     }
+    showFallbackNotice(summarizeResult.source === 'fallback', summarizeResult.fallbackReason);
 
     hide('loading');
     setFormDisabled(false);
@@ -184,20 +210,17 @@ $('resummarize').addEventListener('click', async () => {
         : undefined;
     const instructions = $('instructions').value.trim() || undefined;
 
-    const res = await api('/api/summarize', {
-      method: 'POST',
-      body: JSON.stringify({
-        text: pendingTicket.text,
-        sourceUrl: pendingTicket.sourceUrl,
-        assigneeName: assigneeName === '선택 안 함' ? undefined : assigneeName,
-        instructions,
-      }),
+    const summarizeResult = await summarizeWithFallback(pendingTicket.text, {
+      sourceUrl: pendingTicket.sourceUrl,
+      assigneeName: assigneeName === '선택 안 함' ? undefined : assigneeName,
+      instructions,
     });
 
-    if (res.draft) {
-      $('title').value = res.draft.title || '';
-      $('description').value = res.draft.description || '';
+    if (summarizeResult.draft) {
+      $('title').value = summarizeResult.draft.title || '';
+      $('description').value = summarizeResult.draft.description || '';
     }
+    showFallbackNotice(summarizeResult.source === 'fallback', summarizeResult.fallbackReason);
 
     hide('loading');
     setFormDisabled(false);

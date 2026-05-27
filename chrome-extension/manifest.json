@@ -3,7 +3,24 @@
   "name": "FEHG 티켓 생성기",
   "version": "1.0.0",
   "description": "웹 페이지에서 텍스트를 선택하고 우클릭하여 FEHG Jira 티켓을 생성합니다.",
-  "permissions": ["contextMenus", "storage", "activeTab"],
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "activeTab",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://internal-apigw-kr.hmg-corp.io/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "hchat-cors",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "background": {
     "service_worker": "background.js"
   },

@@ -140,6 +140,7 @@
 
     <!-- 폼 -->
     <div id="form">
+      <div class="status warn" id="fallbackNotice" style="display:none;">⚠️ 외부망 모드로 요약했어요 (h-chat 도달 실패 → Anthropic 폴백)</div>
       <div class="preview" id="preview"></div>
 
       <!-- 단일: 담당자 -->
@@ -204,6 +205,7 @@
   </div>
 
   <script src="config.js"></script>
+  <script src="llm.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -2,6 +2,7 @@ import { getActiveEpics } from '../jira/epics';
 import { summarizeTextToTicket, TextSummarizeContext } from '../llm/summarize';
 import { invokeWorker } from '../invokeWorker';
 import { SLACK_JIRA_USER_MAP, SLACK_USER_NAMES } from '../constant';
+import { getSetting } from '../db';
 
 interface ApiRequest {
   path: string;
@@ -68,6 +69,17 @@ export const handleApiRequest = async (req: ApiRequest): Promise<ApiResponse> =>
       name: SLACK_USER_NAMES[slackId] || slackId,
     }));
     return json(200, { members });
+  }
+
+  // GET /api/hchat-credentials — h-chat (사내망 Claude) API 키 조회
+  // 익스텐션이 직접 h-chat 을 호출하므로 키를 받아간다.
+  // 키는 Supabase settings 테이블에 저장되며 git history 에 안 들어간다.
+  if (req.path === '/api/hchat-credentials' && req.method === 'GET') {
+    const apiKey = await getSetting('hchat_api_key');
+    if (!apiKey) {
+      return json(500, { error: 'h-chat 자격증명이 settings 테이블에 없음' });
+    }
+    return json(200, { apiKey });
   }
 
   // POST /api/summarize — 텍스트 기반 LLM 요약
