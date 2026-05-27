@@ -3,3 +3,6 @@ node_modules/
 dist/
 .serverless/
 app.js
+
+# Chrome 익스텐션 로드 시 자동 생성되는 declarativeNetRequest 인덱스
+chrome-extension/_metadata/
