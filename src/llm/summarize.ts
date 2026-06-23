@@ -540,6 +540,7 @@ const MONTHLY_SYSTEM_PROMPT = `너는 팀의 월간 성과 보고서를 평가 �
 입력은 한 사용자의 한 달간 활동을 여러 소스에서 통합 수집한 데이터이다.
 다음 섹션이 입력에 들어올 수 있고, 일부 섹션은 비어있을 수 있다 (없으면 그 소스는 분석에서 제외):
 
+- <FE1_WEEKLY>: 본인이 직접 작성한 주차별 위클리 (한 일/할 일/이슈/공유). 본인이 한 주 내용을 직접 추려 정리한 1차 자료라 **가장 신뢰도가 높다** — 성과 후보를 여기서 우선 뽑고, 다른 소스로 보강한다. 단, "할 일" 은 미래 계획이므로 성과로 잡지 말 것.
 - <CONFLUENCE>: 본인 작성/수정 페이지 목록
 - <SLACK>: FE1 활동 채널의 본인 메시지 (각 메시지는 \`[YYYY-MM-DD | #채널 | Slack 영구링크]\` 헤더 + "---" 구분)
 - (참고) <JIRA>, <GITLAB>: 입력에 들어오면 동일한 방식으로 통합 분석한다.
@@ -582,6 +583,7 @@ ${Q_CODE_REFERENCE}
 ## 근거 인용 규칙
 - 각 성과 항목의 **근거** 는 그 작업을 가장 잘 증명하는 링크 **1~3개** 를 불릿으로 나열.
 - 우선순위: GitLab MR > Confluence 페이지 > Jira 티켓 > Slack permalink. 여러 소스가 같은 작업을 다루면 모두 인용.
+- <FE1_WEEKLY> 는 성과 후보 발굴용 1차 자료로 활용하되, 위클리 페이지 URL 자체는 근거 링크로 인용하지 않는다 (단순 요약 페이지라 결정적 증거가 아님). 위클리에서 발견한 성과는 본문의 GitLab/Confluence/Jira/Slack 링크로 근거를 잡는다.
 - Slack permalink 는 다른 소스 자료가 없거나, 논의/결정 과정 자체가 핵심 가치인 경우에만 인용.
 - Confluence 가 그 자체로 결과물인 성과는 반드시 Confluence URL 인용.
 
@@ -653,6 +655,7 @@ export interface MonthlyMeta {
   slackMessageCount: number;
   confluencePageCount: number;
   jiraIssueCount: number;
+  fe1WeeklyCount: number;
 }
 
 /**
@@ -672,6 +675,7 @@ export const summarizeMonthlyAchievements = async (
     ? `\n<메타 — 본인 ${yearMonth} 활동 통계>
 - Slack 메시지: ${meta.slackMessageCount}건 (모니터링 대상 채널 합산)
 - Confluence 페이지: ${meta.confluencePageCount}개 (작성/수정)
+- FE1 위클리: ${meta.fe1WeeklyCount}주차 (본인이 직접 작성한 한 일/할 일/이슈)
 - Jira 티켓: ${meta.jiraIssueCount}개 (assignee 본인)
 </메타>\n`
     : '';

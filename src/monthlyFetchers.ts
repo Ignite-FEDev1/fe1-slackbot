@@ -388,6 +388,170 @@ export const fetchConfluenceMonthlyPages = async (
   }
 };
 
+// ─── FE1 위클리 페이지 본인 행 추출 ────────────────────────────────
+//
+// "FE1) 위클리" 부모 페이지(1323532404) 의 자식 페이지들은 한 주 위클리 한 장씩,
+// 제목 포맷 "FE1) 위클리 - YYYY-MM-DD". 본문은 표 1개: [작성자 | 한 일 | 할 일 | 이슈/공유].
+// 표의 작성자 셀이 userName 과 일치하는 행만 추출해 monthly-report 의 1차 입력으로 추가한다.
+// (`fetchConfluenceMonthlyPages` 의 creator/contributor 쿼리로는 공동 편집 페이지라 못 잡힘)
+
+const FE1_WEEKLY_PARENT_ID = '1323532404';
+
+export interface FE1WeeklyEntry {
+  weekDate: string; // YYYY-MM-DD (페이지 제목에서 추출)
+  url: string;
+  done: string;
+  todo: string;
+  issues: string;
+}
+
+interface ConfluenceChildPage {
+  id: string;
+  title: string;
+  _links?: { webui?: string };
+}
+
+/**
+ * Confluence storage 포맷(XHTML 비슷) 을 LLM 입력용 평탄 텍스트로 변환.
+ * - <a href="X">Y</a> → "Y (X)"
+ * - <li> → "- "  (들여쓰기는 단순화: depth 무관 단일 레벨)
+ * - <p>, <br> → 줄바꿈
+ * - 나머지 태그/엔티티 제거
+ */
+const storageHtmlToText = (html: string): string => {
+  let s = html;
+  s = s.replace(
+    /<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g,
+    (_, url, inner) => `${inner.replace(/<[^>]+>/g, '').trim()} (${url})`
+  );
+  s = s.replace(/<li[^>]*>/g, '\n- ');
+  s = s.replace(/<\/li>/g, '');
+  s = s.replace(/<\/?ul[^>]*>/g, '\n');
+  s = s.replace(/<\/?ol[^>]*>/g, '\n');
+  s = s.replace(/<br\s*\/?>/g, '\n');
+  s = s.replace(/<\/p>/g, '\n');
+  s = s.replace(/<[^>]+>/g, '');
+  s = s
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&rsquo;/g, "'")
+    .replace(/&ldquo;/g, '"')
+    .replace(/&rdquo;/g, '"');
+  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+  return s.trim();
+};
+
+/** <td>...</td> 블록들을 순서대로 반환. <th> 는 건너뜀. */
+const splitRowCells = (rowHtml: string): string[] => {
+  const cells: string[] = [];
+  const re = /<td\b[^>]*>([\s\S]*?)<\/td>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(rowHtml)) !== null) cells.push(m[1]);
+  return cells;
+};
+
+/**
+ * FE1 위클리 부모 페이지의 자식 중 해당 월(yearMonth) 페이지를 모아
+ * `userName` 행만 한 일/할 일/이슈 텍스트로 평탄화해 반환.
+ * 한 페이지에 본인 행이 없으면 skip.
+ */
+export const fetchFE1WeeklyForUser = async (
+  auth: { email: string; token: string },
+  userName: string,
+  range: MonthRange
+): Promise<FE1WeeklyEntry[]> => {
+  if (!userName) return [];
+
+  let children: ConfluenceChildPage[] = [];
+  try {
+    const res = await axios.get(
+      `${CONFLUENCE_HOST}/rest/api/content/${FE1_WEEKLY_PARENT_ID}/child/page`,
+      {
+        params: { limit: 50 },
+        auth: { username: auth.email, password: auth.token },
+        timeout: 30000,
+      }
+    );
+    children = (res.data?.results ?? []) as ConfluenceChildPage[];
+  } catch (e: any) {
+    console.error(
+      '[fe1-weekly-fetcher] child 목록 실패:',
+      e?.response?.status,
+      e?.message
+    );
+    return [];
+  }
+
+  // 제목 "FE1) 위클리 - YYYY-MM-DD" 에서 날짜 추출 후 해당 월만 필터.
+  const TITLE_DATE_RE = /(\d{4})-(\d{2})-(\d{2})/;
+  const targets = children.flatMap((c) => {
+    const m = c.title.match(TITLE_DATE_RE);
+    if (!m) return [];
+    const ym = `${m[1]}-${m[2]}`;
+    if (ym !== range.yearMonth) return [];
+    return [{ id: c.id, title: c.title, weekDate: `${m[1]}-${m[2]}-${m[3]}` }];
+  });
+
+  console.log(
+    `[fe1-weekly-fetcher] ${range.yearMonth} 대상 페이지: ${targets.length}건`
+  );
+  if (targets.length === 0) return [];
+
+  const entries: FE1WeeklyEntry[] = [];
+  for (const t of targets) {
+    try {
+      const res = await axios.get(`${CONFLUENCE_HOST}/rest/api/content/${t.id}`, {
+        params: { expand: 'body.storage' },
+        auth: { username: auth.email, password: auth.token },
+        timeout: 30000,
+      });
+      const body: string = res.data?.body?.storage?.value ?? '';
+      const webui: string = res.data?._links?.webui ?? `/pages/${t.id}`;
+      const pageUrl = `${CONFLUENCE_HOST}${webui}`;
+
+      // 모든 <tr> 순회 — 첫 셀 텍스트가 userName 과 일치하는 행 찾기.
+      // <th> 헤더 행은 splitRowCells 가 자동 스킵.
+      const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/g;
+      let trMatch: RegExpExecArray | null;
+      let found = false;
+      while ((trMatch = trRe.exec(body)) !== null) {
+        const cells = splitRowCells(trMatch[1]);
+        if (cells.length < 4) continue;
+        const author = storageHtmlToText(cells[0]).trim();
+        if (author !== userName) continue;
+        entries.push({
+          weekDate: t.weekDate,
+          url: pageUrl,
+          done: storageHtmlToText(cells[1]),
+          todo: storageHtmlToText(cells[2]),
+          issues: storageHtmlToText(cells[3]),
+        });
+        found = true;
+        break;
+      }
+      if (!found) {
+        console.log(
+          `[fe1-weekly-fetcher] "${t.title}" 본인 행 없음 (userName="${userName}")`
+        );
+      }
+    } catch (e: any) {
+      console.error(
+        `[fe1-weekly-fetcher] "${t.title}" 본문 조회 실패:`,
+        e?.response?.status,
+        e?.message
+      );
+    }
+  }
+
+  console.log(`[fe1-weekly-fetcher] 본인 행 추출: ${entries.length}건`);
+  return entries;
+};
+
 // ─── GitLab MR 조회 ─────────────────────────────────────────────────
 
 export interface GitlabMR {

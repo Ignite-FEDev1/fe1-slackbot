@@ -3,6 +3,7 @@ import {
   DAILY_SCRUM_CHANNEL,
   MONTHLY_REPORT_CHANNELS,
   SLACK_JIRA_USER_MAP,
+  SLACK_USER_NAMES,
 } from './constant';
 import { getJiraCredsByAccountId } from './db';
 import { createFehgTask, CreatedIssue } from './jira/createIssue';
@@ -27,9 +28,11 @@ import {
 import {
   buildKstMonthRange,
   fetchConfluenceMonthlyPages,
+  fetchFE1WeeklyForUser,
   fetchJiraMonthlyIssues,
   fetchSlackMultiChannel,
   type ConfluencePage,
+  type FE1WeeklyEntry,
   type GitlabMR,
   type JiraIssue,
   type SlackUserMessage,
@@ -1051,13 +1054,20 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
             'FEHG',
           ])
         : Promise.resolve([] as JiraIssue[]);
+    // FE1 위클리 부모 페이지에서 본인 행만 추출 (이름은 SLACK_USER_NAMES 매핑)
+    const fe1WeeklyName = SLACK_USER_NAMES[p.triggerUserId];
+    const fe1WeeklyPromise =
+      fe1WeeklyName && igniteAuth
+        ? fetchFE1WeeklyForUser(igniteAuth, fe1WeeklyName, range)
+        : Promise.resolve([] as FE1WeeklyEntry[]);
 
-    const [userInfo, slackResult, confluencePages, jiraIssues] =
+    const [userInfo, slackResult, confluencePages, jiraIssues, fe1Weekly] =
       await Promise.all([
         userInfoPromise,
         slackPromise,
         confluencePromise,
         jiraPromise,
+        fe1WeeklyPromise,
       ]);
 
     const userName =
@@ -1069,7 +1079,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     const failedChannels = slackResult.failedChannels;
 
     console.log(
-      `[worker] monthly-report 수집 완료: slack=${slackMessages.length} (실패채널 ${failedChannels.length}), confluence=${confluencePages.length}, jira=${jiraIssues.length}`,
+      `[worker] monthly-report 수집 완료: slack=${slackMessages.length} (실패채널 ${failedChannels.length}), confluence=${confluencePages.length}, jira=${jiraIssues.length}, fe1-weekly=${fe1Weekly.length}`,
     );
 
     const rawText = buildMonthlyInput(
@@ -1077,6 +1087,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
       [],
       confluencePages,
       [],
+      fe1Weekly,
       MONTHLY_MAX_INPUT_CHARS,
     );
 
@@ -1096,12 +1107,13 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
         ? summarizeMonthlyAchievements(
             rawText,
             userName,
-            `(Slack ${MONTHLY_REPORT_CHANNELS.length}개 + Confluence)`,
+            `(Slack ${MONTHLY_REPORT_CHANNELS.length}개 + Confluence + FE1 위클리)`,
             p.yearMonth,
             {
               slackMessageCount: slackMessages.length,
               confluencePageCount: confluencePages.length,
               jiraIssueCount: jiraIssues.length,
+              fe1WeeklyCount: fe1Weekly.length,
             },
           )
         : Promise.resolve(null),
@@ -1131,6 +1143,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     const statsParts = [
       `Slack ${slackMessages.length}건`,
       `Confluence ${confluencePages.length}페이지`,
+      `FE1 위클리 ${fe1Weekly.length}주차`,
       `Jira ${jiraIssues.length}티켓`,
     ];
     if (failedChannels.length > 0) {
@@ -1253,9 +1266,25 @@ const buildMonthlyInput = (
   jira: JiraIssue[],
   confluence: ConfluencePage[],
   gitlab: GitlabMR[],
+  fe1Weekly: FE1WeeklyEntry[],
   maxChars: number,
 ): string => {
   const sections: string[] = [];
+
+  // FE1 위클리 본인 행 — 사용자가 직접 정리한 1차 자료라 최상단 배치 (LLM 우선 신뢰)
+  if (fe1Weekly.length > 0) {
+    const blocks = fe1Weekly.map((w) => {
+      const parts: string[] = [`[${w.weekDate} 주차 | ${w.url}]`];
+      if (w.done.trim()) parts.push(`<한 일>\n${w.done.trim()}\n</한 일>`);
+      if (w.todo.trim()) parts.push(`<할 일>\n${w.todo.trim()}\n</할 일>`);
+      if (w.issues.trim())
+        parts.push(`<이슈/공유>\n${w.issues.trim()}\n</이슈/공유>`);
+      return parts.join('\n');
+    });
+    sections.push(
+      `<FE1_WEEKLY (본인 작성 위클리, ${fe1Weekly.length}주차)>\n${blocks.join('\n\n---\n\n')}\n</FE1_WEEKLY>`,
+    );
+  }
 
   // Jira 섹션
   if (jira.length > 0) {
