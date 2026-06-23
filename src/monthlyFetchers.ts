@@ -14,9 +14,23 @@ export const JIRA_HOSTS = {
 } as const;
 export type JiraInstance = keyof typeof JIRA_HOSTS;
 
-export const buildSlackPermalink = (channelId: string, ts: string): string => {
+/**
+ * Slack 메시지 permalink 생성.
+ * - top-level 메시지: `threadTs` 생략 (또는 ts 와 동일)
+ * - 쓰레드 reply: `threadTs` 에 parent ts 를 넘겨야 정확한 위치로 이동 가능.
+ *   `thread_ts` 쿼리가 없으면 Slack 이 메시지 위치를 못 찾고 채널로 fallback 함.
+ */
+export const buildSlackPermalink = (
+  channelId: string,
+  ts: string,
+  threadTs?: string
+): string => {
   const tsNoDot = ts.replace('.', '');
-  return `https://${SLACK_WORKSPACE_HOST}/archives/${channelId}/p${tsNoDot}`;
+  const base = `https://${SLACK_WORKSPACE_HOST}/archives/${channelId}/p${tsNoDot}`;
+  if (threadTs && threadTs !== ts) {
+    return `${base}?thread_ts=${threadTs}&cid=${channelId}`;
+  }
+  return base;
 };
 
 // ─── Slack 멀티 채널 수집 ──────────────────────────────────────────
@@ -136,7 +150,7 @@ const fetchSlackOneChannel = async (
                   ts: m.ts,
                   text: m.text,
                   date: tsToKstDate(m.ts),
-                  permalink: buildSlackPermalink(channelId, m.ts),
+                  permalink: buildSlackPermalink(channelId, m.ts, parent.ts),
                 });
               }
             }
