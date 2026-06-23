@@ -4,7 +4,24 @@
 // - 티켓 생성/배치/텍스트(Chrome Ext) → callLlm + MODEL_FAST (Haiku): 짧은 추출이라 Haiku 충분, latency 도 양호.
 //   호출 경로는 worker 비동기 (init_ticket_modal_work) 라 30초 타임아웃 무관.
 // - daily/weekly/monthly 요약 → callLlm + MODEL_DEFAULT (Sonnet): 품질 우선.
-import { callLlm, MODEL_FAST } from './client';
+import { callLlm, callLlmText, MODEL_FAST } from './client';
+
+/**
+ * 응답 텍스트에서 <tag>...</tag> 안의 본문 추출.
+ * - closing 태그 있으면 그 사이 본문 반환 (lazy 매칭)
+ * - closing 태그 없으면 (max_tokens 잘림) opening 태그 이후 끝까지 반환
+ * - opening 태그조차 없으면 null
+ */
+const extractXmlTag = (text: string, tag: string): string | null => {
+  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const closed = text.match(
+    new RegExp(`<${escaped}>([\\s\\S]*?)<\\/${escaped}>`)
+  );
+  if (closed) return closed[1].trim();
+  const open = text.match(new RegExp(`<${escaped}>([\\s\\S]*)$`));
+  if (open) return open[1].trim();
+  return null;
+};
 
 /**
  * LLM 응답 JSON 을 파싱하여 TicketDraft 로 반환.
@@ -276,12 +293,13 @@ export const summarizeUserDoneFromDailyScrum = async (
 ${STYLE_RULES}
 
 ## 응답 형식
-반드시 아래 JSON 으로만 응답:
-{
-  "summary": string  // 마크다운. **프로젝트명** 헤더 + 불릿(-) 리스트
-}
+반드시 아래 형식으로만 응답하라. 태그 바깥에 다른 텍스트(설명/인사/코드펜스)를 절대 넣지 마라:
 
-빈 결과면 summary 는 "(추출된 한 일 없음)" 으로.`;
+<summary>
+...마크다운. **프로젝트명** 헤더 + 불릿(-) 리스트...
+</summary>
+
+빈 결과면 <summary> 안에 "(추출된 한 일 없음)" 만 적어라.`;
 
   const fewShotInput = `=== 2026-04-30 (목) ===
 할 일
@@ -312,9 +330,16 @@ gw-lib changelog 작성
 CPO
 0501 정기배포 QA 대응`;
 
-  const fewShotOutput = `{
-  "summary": "**CPO**\\n- [Jira 티켓관리] 데일리 동기화 - CPO VQ 제외\\n- CPO Nodejs - hmgAdmin internal API 아웃바운드 해제 요청 처리\\n- DataDog → Pinpoint 마이그레이션 - 기술검토\\n- 0501 정기배포 QA 대응\\n\\n**그룹웨어**\\n- gw-lib changelog 작성"
-}`;
+  const fewShotOutput = `<summary>
+**CPO**
+- [Jira 티켓관리] 데일리 동기화 - CPO VQ 제외
+- CPO Nodejs - hmgAdmin internal API 아웃바운드 해제 요청 처리
+- DataDog → Pinpoint 마이그레이션 - 기술검토
+- 0501 정기배포 QA 대응
+
+**그룹웨어**
+- gw-lib changelog 작성
+</summary>`;
 
   const userPrompt = `<예시 입력>
 ${fewShotInput}
@@ -328,21 +353,18 @@ ${fewShotOutput}
 ${rawText}
 </실제 입력>`;
 
-  const raw = await callLlm(system, userPrompt);
+  const raw = await callLlmText(system, userPrompt);
   if (!raw) {
-    console.error('[llm] daily-summary callLlm 가 null 반환 (네트워크/API 에러)');
+    console.error('[llm] daily-summary callLlmText 가 null 반환 (네트워크/API 에러)');
     return null;
   }
   console.log('[llm] daily-summary raw 응답 (앞 500자):', raw.slice(0, 500));
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.summary === 'string') return parsed.summary;
-    console.error('[llm] daily-summary parsed.summary 가 문자열 아님:', typeof parsed?.summary, parsed);
-    return null;
-  } catch (e) {
-    console.error('[llm] daily-summary JSON 파싱 실패. raw:', raw);
+  const summary = extractXmlTag(raw, 'summary');
+  if (summary === null) {
+    console.error('[llm] daily-summary <summary> 태그 추출 실패. raw:', raw);
     return null;
   }
+  return summary;
 };
 
 // ─── 월간 성과 요약 (Q코드 평가 기준) ───────────────────────────────
@@ -384,7 +406,28 @@ const FEW_SHOT_INPUT_1 = `[2026-03-10 | https://ignite0830.slack.com/archives/CX
 [2026-03-15 | https://ignite0830.slack.com/archives/CXXX/p1775400000000001]
 일괄 티켓 생성/변경 기능도 추가했습니다. 쓰레드 우클릭 → 담당자 다중선택 → 일괄 생성. 기존에 1인당 7회씩 수동 생성하면 21분 걸리던 게 1분이면 끝남. 95% 단축. 일괄 변경도 동일하게 동작합니다.`;
 
-const FEW_SHOT_OUTPUT_1 = `{"summary":"## [Q1-1] 신규과제 제안력\\n\\n### 슬랙봇 Jira 티켓 자동 생성 기능 개발 및 팀 배포\\n\\n슬랙 쓰레드 우클릭만으로 Groq LLM이 자동 요약해 Jira 티켓을 생성하는 기능을 신규 개발 및 팀 배포. 후속으로 일괄 생성/변경 기능까지 확장.\\n\\n**정량적 효과**\\n- 티켓 생성 시간: 3분 → 15초 (87.5% 단축)\\n- 팀 4월 티켓 230건 기준 월 10.5시간, 인당 1.5시간 절약\\n- 일괄 생성: 21분 → 1분 (95% 단축, 1인 7회 수동 → 1회 일괄)\\n\\n**정성적 효과**\\n- 슬랙 쓰레드에서 즉시 티켓화 → 논의 누락률 감소\\n- AI가 맥락 자동 요약 → 작성 부담/누락 감소\\n- 생성 즉시 채널 공유 → 별도 공지 비용 제거\\n- 담당자 다중 선택으로 누락 없이 전원 자동 배분\\n\\n**근거**\\n- https://ignite0830.slack.com/archives/CXXX/p1775200000000001\\n- https://ignite0830.slack.com/archives/CXXX/p1775400000000001"}`;
+const FEW_SHOT_OUTPUT_1 = `<summary>
+## [Q1-1] 신규과제 제안력
+
+### 슬랙봇 Jira 티켓 자동 생성 기능 개발 및 팀 배포
+
+슬랙 쓰레드 우클릭만으로 Groq LLM이 자동 요약해 Jira 티켓을 생성하는 기능을 신규 개발 및 팀 배포. 후속으로 일괄 생성/변경 기능까지 확장.
+
+**정량적 효과**
+- 티켓 생성 시간: 3분 → 15초 (87.5% 단축)
+- 팀 4월 티켓 230건 기준 월 10.5시간, 인당 1.5시간 절약
+- 일괄 생성: 21분 → 1분 (95% 단축, 1인 7회 수동 → 1회 일괄)
+
+**정성적 효과**
+- 슬랙 쓰레드에서 즉시 티켓화 → 논의 누락률 감소
+- AI가 맥락 자동 요약 → 작성 부담/누락 감소
+- 생성 즉시 채널 공유 → 별도 공지 비용 제거
+- 담당자 다중 선택으로 누락 없이 전원 자동 배분
+
+**근거**
+- https://ignite0830.slack.com/archives/CXXX/p1775200000000001
+- https://ignite0830.slack.com/archives/CXXX/p1775400000000001
+</summary>`;
 
 const FEW_SHOT_INPUT_2 = `[2026-03-05 | https://ignite0830.slack.com/archives/CYYY/p1775000000000001]
 다국어 파일 머지 충돌 자주 나는 거 원인 분석해봤습니다. lokalise에서 받은 en.json/ko.json이 minified 단일 줄 + 키 순서가 비결정적이라 같은 파일 두 사람이 받으면 diff가 다르게 잡힙니다.
@@ -401,7 +444,21 @@ A안은 CI 의존성 너무 커지고, B안은 한 줄 수정으로 해결되니
 [2026-03-09 | https://ignite0830.slack.com/archives/CYYY/p1775200000000002]
 다국어 머지 충돌 방지 개선안 최종 결정. download.ts에서 키 정렬 + pretty-print 적용하는 방향으로 0416 배포 예정입니다.`;
 
-const FEW_SHOT_OUTPUT_2 = `{"summary":"## [Q3-3] 자발적 개선·혁신 시도\\n\\n### 다국어(lokalise) JSON 파일 머지 충돌 방지 개선안 제안 및 팀 합의 도출\\n\\n그룹웨어 개발 시 빈번하게 발생하던 다국어 파일 머지 충돌의 근본 원인(minified 단일 줄 + 비결정적 키 순서)을 분석하고, 2가지 개선안을 비교해 팀에 제안. 팀원들의 대안(Prettier, husky pre-commit) 피드백에 논리적으로 응답하며 합의를 이끌어냄. 최종적으로 download.ts에서 키 정렬 + pretty-print 적용 방식으로 확정, 0416 배포 예정.\\n\\n**정성적 효과**\\n- 머지 충돌 발생 원인을 명확히 분석/공유\\n- 2가지 대안 비교로 팀 의사결정 비용 절감\\n- 자동 다운로드 스크립트 단계에서 정리 → 모든 팀원 자동 적용\\n\\n**근거**\\n- https://ignite0830.slack.com/archives/CYYY/p1775200000000002"}`;
+const FEW_SHOT_OUTPUT_2 = `<summary>
+## [Q3-3] 자발적 개선·혁신 시도
+
+### 다국어(lokalise) JSON 파일 머지 충돌 방지 개선안 제안 및 팀 합의 도출
+
+그룹웨어 개발 시 빈번하게 발생하던 다국어 파일 머지 충돌의 근본 원인(minified 단일 줄 + 비결정적 키 순서)을 분석하고, 2가지 개선안을 비교해 팀에 제안. 팀원들의 대안(Prettier, husky pre-commit) 피드백에 논리적으로 응답하며 합의를 이끌어냄. 최종적으로 download.ts에서 키 정렬 + pretty-print 적용 방식으로 확정, 0416 배포 예정.
+
+**정성적 효과**
+- 머지 충돌 발생 원인을 명확히 분석/공유
+- 2가지 대안 비교로 팀 의사결정 비용 절감
+- 자동 다운로드 스크립트 단계에서 정리 → 모든 팀원 자동 적용
+
+**근거**
+- https://ignite0830.slack.com/archives/CYYY/p1775200000000002
+</summary>`;
 
 // 4 소스가 모두 등장하는 통합 예시: Jira 티켓 + GitLab MR + Confluence + Slack 논의가 모두 한 작업.
 const FEW_SHOT_INPUT_3 = `<JIRA 티켓 (1건)>
@@ -427,7 +484,28 @@ Anthropic Sonnet 4.6 으로 전환했어요. Tier 1 ITPM 40K 라 한도 걱정 �
 배포 완료. 4 소스 (Slack/Jira/Confluence/GitLab) 통합 monthly-report 도 정상 동작 확인.
 </SLACK>`;
 
-const FEW_SHOT_OUTPUT_3 = `{"summary":"## [Q3-3] 자발적 개선·혁신 시도\\n\\n### 슬랙봇 LLM 인프라 Anthropic Sonnet 4.6 전환 및 prompt caching 적용\\n\\n기존 Groq free tier 의 TPM 8K 한도 때문에 monthly-report 가 활성 채널에서 매번 실패하던 이슈를 분석. 비용/한도/품질 비교 문서 작성 후 Anthropic Sonnet 4.6 으로 전면 전환, prompt caching 까지 적용해 비용 절감과 한도 제거를 동시 달성.\\n\\n**정량적 효과**\\n- TPM 한도: 8K (Groq free) → 40K (Anthropic Tier 1, 5배)\\n- prompt caching 적용 시 입력 비용 90% 절감\\n- 팀 8명 월 예상 비용 4~5천원\\n\\n**정성적 효과**\\n- monthly-report 활성 채널 실패 이슈 근본 해결\\n- 한국어 nuance/JSON 구조화 출력 품질 동시 상승\\n- 4 소스 통합 (Slack/Jira/Confluence/GitLab) 안정화\\n\\n**근거**\\n- https://gitlab.hmc.co.kr/hmg-groupware/hmg-groupware-portal/assemble-fe/-/merge_requests/789\\n- https://ignitecorp.atlassian.net/wiki/spaces/IF/pages/9999\\n- https://ignitecorp.atlassian.net/browse/FEHG-456"}`;
+const FEW_SHOT_OUTPUT_3 = `<summary>
+## [Q3-3] 자발적 개선·혁신 시도
+
+### 슬랙봇 LLM 인프라 Anthropic Sonnet 4.6 전환 및 prompt caching 적용
+
+기존 Groq free tier 의 TPM 8K 한도 때문에 monthly-report 가 활성 채널에서 매번 실패하던 이슈를 분석. 비용/한도/품질 비교 문서 작성 후 Anthropic Sonnet 4.6 으로 전면 전환, prompt caching 까지 적용해 비용 절감과 한도 제거를 동시 달성.
+
+**정량적 효과**
+- TPM 한도: 8K (Groq free) → 40K (Anthropic Tier 1, 5배)
+- prompt caching 적용 시 입력 비용 90% 절감
+- 팀 8명 월 예상 비용 4~5천원
+
+**정성적 효과**
+- monthly-report 활성 채널 실패 이슈 근본 해결
+- 한국어 nuance/JSON 구조화 출력 품질 동시 상승
+- 4 소스 통합 (Slack/Jira/Confluence/GitLab) 안정화
+
+**근거**
+- https://gitlab.hmc.co.kr/hmg-groupware/hmg-groupware-portal/assemble-fe/-/merge_requests/789
+- https://ignitecorp.atlassian.net/wiki/spaces/IF/pages/9999
+- https://ignitecorp.atlassian.net/browse/FEHG-456
+</summary>`;
 
 // Confluence 가 핵심 결과물인 케이스. Slack 에서는 단순 공유만, Confluence URL 이 결정적 증거.
 const FEW_SHOT_INPUT_4 = `<CONFLUENCE 페이지 (1건)>
@@ -439,7 +517,22 @@ const FEW_SHOT_INPUT_4 = `<CONFLUENCE 페이지 (1건)>
 멀티 프로젝트 작업할 때 슬랙/팀즈/IDE 등 자주 쓰는 창을 단축키 하나로 즉시 띄울 수 있는 macOS Apple Script 가이드 컨플에 정리해두었습니다. 별도 프로그램 설치 없이 가능. 영상도 같이 첨부했어요. 링크 / Confluence
 </SLACK>`;
 
-const FEW_SHOT_OUTPUT_4 = `{"summary":"## [Q1-5] 지식전파/확산력\\n\\n### macOS 단축키로 앱/IDE 즉시 전환 가이드 작성 및 팀 공유\\n\\n여러 프로젝트를 동시에 작업하는 팀원의 생산성 향상을 위해 Apple Script 기반 글로벌 단축키 설정 방법을 Confluence 가이드로 작성. 별도 프로그램 설치 없이 슬랙/팀즈/IDE/그룹웨어 등 원하는 창을 단축키 하나로 즉시 전환할 수 있도록 직접 검증 후 영상과 함께 공유.\\n\\n**정성적 효과**\\n- 멀티 프로젝트 작업 전환 비용 감소 → 팀 생산성 향상\\n- 별도 프로그램 의존 없이 OS 기본 기능으로 해결\\n- 영상 첨부로 진입 장벽 최소화\\n\\n**근거**\\n- https://ignitecorp.atlassian.net/wiki/spaces/IF/pages/2405728293\\n- https://ignite0830.slack.com/archives/C04HYKFMXT2/p1776401234567890"}`;
+const FEW_SHOT_OUTPUT_4 = `<summary>
+## [Q1-5] 지식전파/확산력
+
+### macOS 단축키로 앱/IDE 즉시 전환 가이드 작성 및 팀 공유
+
+여러 프로젝트를 동시에 작업하는 팀원의 생산성 향상을 위해 Apple Script 기반 글로벌 단축키 설정 방법을 Confluence 가이드로 작성. 별도 프로그램 설치 없이 슬랙/팀즈/IDE/그룹웨어 등 원하는 창을 단축키 하나로 즉시 전환할 수 있도록 직접 검증 후 영상과 함께 공유.
+
+**정성적 효과**
+- 멀티 프로젝트 작업 전환 비용 감소 → 팀 생산성 향상
+- 별도 프로그램 의존 없이 OS 기본 기능으로 해결
+- 영상 첨부로 진입 장벽 최소화
+
+**근거**
+- https://ignitecorp.atlassian.net/wiki/spaces/IF/pages/2405728293
+- https://ignite0830.slack.com/archives/C04HYKFMXT2/p1776401234567890
+</summary>`;
 
 // system prompt 는 모든 호출에서 동일하게 유지 → Anthropic prompt cache hit.
 // 동적 값(userName, yearMonth, rawText)은 user message 로만 전달한다.
@@ -513,13 +606,14 @@ ${Q_CODE_REFERENCE}
 
 (다음 성과...)
 
-## 응답 형식 (JSON)
-반드시 아래 JSON 으로만 응답:
-{
-  "summary": string  // 위 마크다운 구조
-}
+## 응답 형식
+반드시 아래 형식으로만 응답하라. 태그 바깥에 다른 텍스트(설명/인사/코드펜스)를 절대 넣지 마라:
 
-추출 가능한 성과가 없으면 summary 는 "(해당 월 동안 추출 가능한 성과 없음)" 으로.
+<summary>
+...위 마크다운 구조...
+</summary>
+
+추출 가능한 성과가 없으면 <summary> 안에 "(해당 월 동안 추출 가능한 성과 없음)" 만 적어라.
 
 ## 예시
 
@@ -592,21 +686,20 @@ ${metaBlock}
 ${rawText}
 </실제 입력>`;
 
-  const raw = await callLlm(MONTHLY_SYSTEM_PROMPT, userPrompt, { maxTokens: 16384 });
+  const raw = await callLlmText(MONTHLY_SYSTEM_PROMPT, userPrompt, {
+    maxTokens: 16384,
+  });
   if (!raw) {
-    console.error('[llm] monthly-report callLlm 가 null 반환');
+    console.error('[llm] monthly-report callLlmText 가 null 반환');
     return null;
   }
   console.log('[llm] monthly-report raw 응답 (앞 800자):', raw.slice(0, 800));
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.summary === 'string') return parsed.summary;
-    console.error('[llm] monthly-report parsed.summary 가 문자열 아님:', typeof parsed?.summary);
-    return null;
-  } catch (e) {
-    console.error('[llm] monthly-report JSON 파싱 실패. raw:', raw);
+  const summary = extractXmlTag(raw, 'summary');
+  if (summary === null) {
+    console.error('[llm] monthly-report <summary> 태그 추출 실패. raw:', raw);
     return null;
   }
+  return summary;
 };
 
 // ─── 월간 Jira 티켓 → "수행" 섹션 정리 (Q코드 무관, 단순 그룹핑) ─────
@@ -630,7 +723,39 @@ const EXECUTION_FEW_SHOT_INPUT = `<JIRA 티켓 (해당 월 본인 활동, 17건)
 - [FEHG-520] (HB FE) PresignedURL 발급 시 파일 원본명·컨텐츠 타입·MD5 추가 (보안 강화) — status: Done · epic: HB 파일 업로드 — PresignedURL 보안 강화
 </JIRA>`;
 
-const EXECUTION_FEW_SHOT_OUTPUT = `{"execution":"## 그룹웨어\\n\\n### 인프라/공통\\n- 검증계 매일 자동배포 스케줄링 (1130, 1800)\\n- 조직도 PC HmgIcon 번들 최적화\\n- 다국어(lokalise) JSON 머지 충돌 방지 출력 포맷 개선\\n\\n### FO\\n- 타임존 기능 전체 구현 및 QA 대응\\n- 환율/주가 컴포넌트 신규 개발\\n- 홈 업무시스템 개선 대응\\n- 통합검색 생성형 AI 답변 — 단일 틸드(~) 취소선 오인식 수정\\n\\n### 멀티테넌트\\n- 멀티테넌트 핸드오프 문서 작성\\n- 멀티테넌트 Claude Code 규칙 및 /mt 파이프라인 세팅\\n\\n### 조직도\\n- 조직도 Teams 모바일 살리기\\n\\n## HB\\n\\n### HB 글로벌 대응 — 리전(Region) 기능 전체 설계·구현\\n- RegionSelectBox 공통 컴포넌트 구현 및 Layout 적용\\n- useRegionNavigation 훅 신규 구현 (페이지 이동 시 region 유지)\\n- ?region= searchParam 페이지 이동 시 유지 로직 + LNB 메뉴 이동 시 보존 처리\\n- useBlocker 적용 (리전 변경 시 미저장 데이터 보호)\\n- 리전 다국어 키 ko/en 추가\\n\\n### HB 파일 업로드 — PresignedURL 보안 강화\\n- PresignedURL 발급 시 파일 원본명·컨텐츠 타입·MD5 추가 (보안 강화)"}`;
+const EXECUTION_FEW_SHOT_OUTPUT = `<execution>
+## 그룹웨어
+
+### 인프라/공통
+- 검증계 매일 자동배포 스케줄링 (1130, 1800)
+- 조직도 PC HmgIcon 번들 최적화
+- 다국어(lokalise) JSON 머지 충돌 방지 출력 포맷 개선
+
+### FO
+- 타임존 기능 전체 구현 및 QA 대응
+- 환율/주가 컴포넌트 신규 개발
+- 홈 업무시스템 개선 대응
+- 통합검색 생성형 AI 답변 — 단일 틸드(~) 취소선 오인식 수정
+
+### 멀티테넌트
+- 멀티테넌트 핸드오프 문서 작성
+- 멀티테넌트 Claude Code 규칙 및 /mt 파이프라인 세팅
+
+### 조직도
+- 조직도 Teams 모바일 살리기
+
+## HB
+
+### HB 글로벌 대응 — 리전(Region) 기능 전체 설계·구현
+- RegionSelectBox 공통 컴포넌트 구현 및 Layout 적용
+- useRegionNavigation 훅 신규 구현 (페이지 이동 시 region 유지)
+- ?region= searchParam 페이지 이동 시 유지 로직 + LNB 메뉴 이동 시 보존 처리
+- useBlocker 적용 (리전 변경 시 미저장 데이터 보호)
+- 리전 다국어 키 ko/en 추가
+
+### HB 파일 업로드 — PresignedURL 보안 강화
+- PresignedURL 발급 시 파일 원본명·컨텐츠 타입·MD5 추가 (보안 강화)
+</execution>`;
 
 const EXECUTION_SYSTEM_PROMPT = `너는 한 사용자가 한 달 동안 진행한 Jira 티켓 목록을 받아,
 "수행한 작업" 섹션을 프로젝트 → 카테고리 → 개별 작업 형태로 단순 그룹핑·정리하는 보조다.
@@ -653,13 +778,14 @@ epic 이 비어있을 수 있다.
 - 명사형 종결 ("개발", "수정", "대응", "구현"). "~함" 어색하면 그냥 명사로 끝.
 - 짧고 명확하게. 부연설명 X.
 
-## 응답 형식 (JSON)
-반드시 아래 JSON 으로만:
-{
-  "execution": string  // 위 마크다운
-}
+## 응답 형식
+반드시 아래 형식으로만 응답하라. 태그 바깥에 다른 텍스트(설명/인사/코드펜스)를 절대 넣지 마라:
 
-티켓이 없으면 execution 은 "(해당 월에 진행한 Jira 티켓 없음)" 으로.
+<execution>
+...위 마크다운...
+</execution>
+
+티켓이 없으면 <execution> 안에 "(해당 월에 진행한 Jira 티켓 없음)" 만 적어라.
 
 ## 예시
 
@@ -687,23 +813,20 @@ export const summarizeMonthlyJiraExecution = async (
 ${rawTicketsBlock}
 </실제 입력>`;
 
-  const raw = await callLlm(EXECUTION_SYSTEM_PROMPT, userPrompt, {
+  const raw = await callLlmText(EXECUTION_SYSTEM_PROMPT, userPrompt, {
     maxTokens: 4096,
   });
   if (!raw) {
-    console.error('[llm] monthly-execution callLlm null 반환');
+    console.error('[llm] monthly-execution callLlmText null 반환');
     return null;
   }
   console.log('[llm] monthly-execution raw 응답 (앞 500자):', raw.slice(0, 500));
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed?.execution === 'string') return parsed.execution;
-    console.error('[llm] monthly-execution parsed.execution 가 문자열 아님:', typeof parsed?.execution);
-    return null;
-  } catch (e) {
-    console.error('[llm] monthly-execution JSON 파싱 실패:', raw);
+  const execution = extractXmlTag(raw, 'execution');
+  if (execution === null) {
+    console.error('[llm] monthly-execution <execution> 태그 추출 실패. raw:', raw);
     return null;
   }
+  return execution;
 };
 
 // ─── 위클리 리포트 (한 일 / 할 일 / 이슈·공유 통합 1회 호출) ────────
@@ -761,7 +884,36 @@ licenses.json, git submodule force README 설명 보강
 [2026-04-30 18:22 #fe1-grouping] [개발처리] 게시판 에디터 외부 이미지 복사-붙여넣기 시 autoway 2.0 이미지 3.0 리소스 전환 — 유승범 책임 쪽에 두레이 발행/팀즈 리마인드했으나 별도 리액션 없는 상태입니다. https://ignite0830.slack.com/archives/.../p4
 </SLACK>`;
 
-const WEEKLY_FEW_SHOT_OUTPUT = `{"done":"**그룹웨어**\\n- 4/30 정기배포 QA 대응\\n  - 블랙덕 취약점 high 건 release/260430 머지\\n  - Froala Editor 라이선스 키 gitlab CI 변수로 변경\\n- licenses.json, git submodule force README 설명 보강\\n- 블랙덕 스캔 슬랙 알림 시간차 원인 파악\\n\\n**CPO**\\n- 4/30 정기배포 QA 대응\\n  - [파트너웹] 400 에러 다건 발생 장애 교차검증","todo":"**그룹웨어 운영 개선**\\n- [FEHG-3148] 그룹공지 개선 요청 (5/4~5/8)\\n\\n**CPO 인프라**\\n- [FEHG-3151] [파트너웹] eslint → biome 마이그레이션 (5/4~5/15)\\n\\n**기타**\\n- [FEHG-3160] 블랙덕 취약점 추가 검출 high 3건 대응 (5/4~5/6)","issues":"**4/29**\\n- 멀티테넌트 전개 초기 세팅 공유 — 별도 리뷰 필요 여부 문의 (링크)\\n- [제안] 팀당 월 $20~$50 anthropic 토큰 지원 요청. monthly-report 결과 품질 근거 (링크)\\n\\n**4/30**\\n- [개발처리] 게시판 에디터 이미지 리소스 전환 — 유승범 책임 쪽 두레이 발행/팀즈 리마인드, 별도 리액션 없음 (링크)"}`;
+const WEEKLY_FEW_SHOT_OUTPUT = `<done>
+**그룹웨어**
+- 4/30 정기배포 QA 대응
+  - 블랙덕 취약점 high 건 release/260430 머지
+  - Froala Editor 라이선스 키 gitlab CI 변수로 변경
+- licenses.json, git submodule force README 설명 보강
+- 블랙덕 스캔 슬랙 알림 시간차 원인 파악
+
+**CPO**
+- 4/30 정기배포 QA 대응
+  - [파트너웹] 400 에러 다건 발생 장애 교차검증
+</done>
+<todo>
+**그룹웨어 운영 개선**
+- [FEHG-3148] 그룹공지 개선 요청 (5/4~5/8)
+
+**CPO 인프라**
+- [FEHG-3151] [파트너웹] eslint → biome 마이그레이션 (5/4~5/15)
+
+**기타**
+- [FEHG-3160] 블랙덕 취약점 추가 검출 high 3건 대응 (5/4~5/6)
+</todo>
+<issues>
+**4/29**
+- 멀티테넌트 전개 초기 세팅 공유 — 별도 리뷰 필요 여부 문의 (링크)
+- [제안] 팀당 월 $20~$50 anthropic 토큰 지원 요청. monthly-report 결과 품질 근거 (링크)
+
+**4/30**
+- [개발처리] 게시판 에디터 이미지 리소스 전환 — 유승범 책임 쪽 두레이 발행/팀즈 리마인드, 별도 리액션 없음 (링크)
+</issues>`;
 
 const WEEKLY_SYSTEM_PROMPT = `너는 FE1팀 위클리 리포트 작성 보조다.
 한 사용자의 한 주간 활동을 3개 소스에서 받아 위클리 문서의 **한 일 / 할 일 / 이슈·공유** 3개 컬럼으로 정리한다.
@@ -798,15 +950,20 @@ const WEEKLY_SYSTEM_PROMPT = `너는 FE1팀 위클리 리포트 작성 보조다
 ## 톤
 ${STYLE_RULES}
 
-## 응답 형식 (JSON)
-반드시 아래 JSON 으로만 응답:
-{
-  "done": string,    // 마크다운
-  "todo": string,    // 마크다운
-  "issues": string   // 마크다운
-}
+## 응답 형식
+반드시 아래 형식으로만 응답하라. 세 태그 모두 반드시 포함. 태그 바깥에 다른 텍스트(설명/인사/코드펜스)를 절대 넣지 마라:
 
-해당 컬럼의 추출 가능한 데이터가 없으면 그 필드는 \`"_(데이터 없음)_"\` 으로.
+<done>
+...마크다운...
+</done>
+<todo>
+...마크다운...
+</todo>
+<issues>
+...마크다운...
+</issues>
+
+해당 컬럼의 추출 가능한 데이터가 없으면 그 태그 안에 \`_(데이터 없음)_\` 만 적어라.
 
 ## 예시
 
@@ -840,25 +997,29 @@ export const summarizeWeeklyReport = async (
 ${inputBlock}
 </실제 입력>`;
 
-  const raw = await callLlm(WEEKLY_SYSTEM_PROMPT, userPrompt, { maxTokens: 8192 });
+  const raw = await callLlmText(WEEKLY_SYSTEM_PROMPT, userPrompt, {
+    maxTokens: 8192,
+  });
   if (!raw) {
-    console.error('[llm] weekly-report callLlm 가 null 반환');
+    console.error('[llm] weekly-report callLlmText 가 null 반환');
     return null;
   }
   console.log('[llm] weekly-report raw 응답 (앞 800자):', raw.slice(0, 800));
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed?.done === 'string' &&
-      typeof parsed?.todo === 'string' &&
-      typeof parsed?.issues === 'string'
-    ) {
-      return { done: parsed.done, todo: parsed.todo, issues: parsed.issues };
-    }
-    console.error('[llm] weekly-report 응답 스키마 불일치:', Object.keys(parsed ?? {}));
-    return null;
-  } catch (e) {
-    console.error('[llm] weekly-report JSON 파싱 실패:', raw);
+  const done = extractXmlTag(raw, 'done');
+  const todo = extractXmlTag(raw, 'todo');
+  const issues = extractXmlTag(raw, 'issues');
+  if (done === null || todo === null || issues === null) {
+    console.error(
+      '[llm] weekly-report 태그 추출 실패. found:',
+      {
+        done: done !== null,
+        todo: todo !== null,
+        issues: issues !== null,
+      },
+      'raw:',
+      raw
+    );
     return null;
   }
+  return { done, todo, issues };
 };
