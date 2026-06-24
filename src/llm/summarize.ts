@@ -833,6 +833,173 @@ ${rawTicketsBlock}
   return execution;
 };
 
+// ─── 월간 회고 "아쉬운 점" — 4 소스 교차 분석 ──────────────────────
+
+const REGRETS_FEW_SHOT_INPUT = `<FE1_WEEKLY (본인 작성 위클리, 4주차)>
+[2026-04-06 주차 | https://...weekly-1]
+<한 일>
+- 그룹웨어
+- [FO] 홈화면 멀티테넌트 전개 - fixme 잔여건
+- 메일/일정 링크 홈화면조회 API 연동
+- 블랙덕 취약점 high 3건 대응
+</한 일>
+<할 일>
+- [FO] 홈화면 멀티테넌트 fixme 잔여건 (계속)
+</할 일>
+<이슈/공유>
+- 블랙덕 자동화 파이프라인 오류 — API key 갱신만으로 일시 해소. 근본 원인 미파악
+- 멀티테넌트 전개 FE 교차 sanity test — 결과 공유 늦어져 BE 측 일정 영향
+</이슈/공유>
+---
+[2026-04-13 주차 | https://...weekly-2]
+<한 일>
+- 홈화면 fixme 잔여건 계속
+- 블랙덕 신규 high 5건 대응 (직접 의존성 버전 업)
+</한 일>
+<이슈/공유>
+- 멀티테넌트 전개 — 사양 모호로 BE 책임자에게 배경 재확인 3회 핑퐁
+- 블랙덕 — 또 신규 검출. 패치 반복만 누적
+</이슈/공유>
+---
+[2026-04-20 주차 | https://...weekly-3]
+<한 일>
+- 홈화면 fixme 잔여건 (3주차)
+- 블랙덕 추가 4건 대응
+</한 일>
+<이슈/공유>
+- 두레이 [D0754] BlackDuck 유예처리 검토 — 보안팀 답변 1주 지연으로 배포 일정 영향
+</이슈/공유>
+---
+[2026-04-27 주차 | https://...weekly-4]
+<한 일>
+- 홈화면 fixme 잔여건 일부 종료
+- 블랙덕 추가 2건 대응
+</한 일>
+<이슈/공유>
+- 멀티테넌트 안드로이드 에뮬레이터 가이드 인수인계 — 작성자 부재로 진행 보류
+</이슈/공유>
+</FE1_WEEKLY>
+
+<JIRA 티켓 (8건)>
+- [FEHG-3148] 홈화면 멀티테넌트 전개 fixme (status: In Progress, resolved: -)
+- [FEHG-3160] 블랙덕 high 3건 대응 #1 (status: Done, resolved: 2026-04-08)
+- [FEHG-3175] 블랙덕 high 5건 대응 #2 (status: Done, resolved: 2026-04-15)
+- [FEHG-3188] 블랙덕 high 4건 대응 #3 (status: Done, resolved: 2026-04-22)
+- [FEHG-3201] 블랙덕 high 2건 대응 #4 (status: Done, resolved: 2026-04-29)
+- [FEHG-3151] eslint → biome 마이그레이션 (status: Backlog, resolved: -)
+- [FEHG-3170] 멀티테넌트 BE 사양 확인 (status: Done, resolved: 2026-04-17)
+- [FEHG-3199] 안드로이드 에뮬레이터 가이드 인수인계 (status: On Hold, resolved: -)
+</JIRA>`;
+
+const REGRETS_FEW_SHOT_OUTPUT = `<regrets>
+### 그룹웨어 홈화면 멀티테넌트 fixme — 4주 연속 캐리오버
+4/6 주차부터 매주 "한 일"과 "할 일"에 동시 등장. 일부씩만 종료되며 잔여건이 다음 주로 계속 넘어가 한 달 동안 마감되지 못함. 잔여 범위/완료 기준이 처음에 명확히 정의되지 않은 것이 원인으로 보임.
+- https://...weekly-1
+- https://ignitecorp.atlassian.net/browse/FEHG-3148
+
+### 블랙덕 취약점 대응 — 월 4차례 동일 패턴 반복, 구조 개선 없음
+한 달간 블랙덕 high 대응 티켓 4건(총 14건). 매번 신규 검출 → 직접 의존성 버전 업 → 머지 사이클만 반복. 자동화/예외처리 정책 정비는 1건도 없어 다음 달에도 같은 패턴이 반복될 가능성.
+- https://ignitecorp.atlassian.net/browse/FEHG-3160
+- https://ignitecorp.atlassian.net/browse/FEHG-3175
+- https://...weekly-2
+
+### 멀티테넌트 전개 — 사양 모호로 BE 책임자와 3회 재확인
+4/13 주차 이슈로 명시. 초기 소통에서 배경/완료 조건이 누락되어 동일 사양을 두고 핑퐁이 발생. 이후 같은 패턴이 안드로이드 에뮬레이터 인수인계(작성자 부재로 보류)에서도 반복.
+- https://...weekly-2
+
+### 외부 의존 지연 — 보안팀 / 작성자 부재로 작업 보류
+두레이 [D0754] 유예처리 답변 1주 지연 → 배포 일정 영향. 에뮬레이터 가이드 인수인계는 원 작성자 부재로 진행 보류. 자체 컨트롤 어려운 외부 의존이 본인 흐름을 두 번 끊음.
+- https://...weekly-3
+- https://ignitecorp.atlassian.net/browse/FEHG-3199
+</regrets>`;
+
+const REGRETS_SYSTEM_PROMPT = `너는 한 사용자의 한 달간 활동(Slack/Jira/Confluence/FE1 위클리 4 소스 통합)을 받아,
+**월간 회고의 "아쉬운 점" 섹션** 을 작성하는 보조다.
+
+성과(잘한 점)가 아니라, **반복적으로 마찰을 일으킨 영역 / 미완료로 다음 달로 넘어간 과제 / 구조적 개선 없이 일회성 대응만 누적된 주제 / 소통·협업의 비효율** 을 4 소스 교차 분석해 정리한다.
+
+## 입력
+${SOURCE_OVERVIEW_FOR_REGRETS()}
+
+특히 \`<FE1_WEEKLY>\` 의 **이슈/공유** 컬럼은 본인이 그 주에 직접 적은 1차 자료다 — 가장 먼저 신뢰하고, 다른 소스(Jira/Slack/Confluence)로 보강한다.
+
+## 추출할 4가지 패턴
+1. **업무적 마찰/병목** — 일정 지연, 의존 대기, QA 재발생, 배포 실패·롤백, 외부 인입으로 본인 일정에 차질
+2. **미완료/보류 과제** — fixme 잔여건, "다음 주에 계속", 여러 주에 걸쳐 같은 항목 반복 등장, On Hold/Backlog 로 밀린 티켓
+3. **일회성 대응만 누적** — 같은 주제(블랙덕, 인증 오류, 운영 이슈 등)에 시간 많이 썼는데 자동화/문서/공통화 같은 구조 개선 결과물이 없음
+4. **소통/협업 마찰** — 초기 소통에서 배경/완료기준 누락으로 여러 차례 재확인 핑퐁, 리마인드 후 무응답, 회의에서 결정 미뤄짐, 모호한 요구사항
+
+## 작성 원칙 (중요)
+- **자기비하 톤 금지**. "내가 못했다", "준비가 부족했다" 같은 평가성 표현 X.
+  대신 관찰자 시점으로: "이 패턴이 N번 반복", "여러 주에 걸쳐 등장", "원인은 ~로 추정".
+- **모든 항목은 입력에 등장한 구체 근거**(위클리 URL / Jira 키 / Confluence URL / Slack permalink)가 있어야 한다.
+  근거 없이 "일반적으로 아쉬웠다" 같은 추상 표현 금지.
+- **같은 주제는 묶어 1개 항목으로**. 헤더는 패턴/주제 + 정량 한 토막 (예: "그룹웨어 홈화면 fixme — 4주 연속 캐리오버", "블랙덕 — 월 4차례 동일 패턴").
+- **항목당 관찰 1~3문장 + 근거 링크 1~3개**.
+- **5~7개 항목** 으로 제한. 약한 항목 억지로 채우지 말 것. 정말 패턴이 없으면 더 적게.
+- "할 일" 컬럼은 미래 계획이므로 그 자체를 아쉬운 점으로 잡지 말 것. 단, **"한 일" + "할 일" 양쪽에 동일 항목이 반복**되어 캐리오버 패턴이 보이면 그건 미완료 시그널로 활용.
+
+## 응답 형식
+반드시 아래 형식으로만 응답하라. 태그 바깥에 다른 텍스트(설명/인사/코드펜스)를 절대 넣지 마라:
+
+<regrets>
+### [주제 — 정량/패턴 한 토막]
+관찰 (1~3문장, 자기비하 X, 근거 기반)
+- 근거 URL 1
+- 근거 URL 2
+</regrets>
+
+추출할 만한 패턴이 정말 없으면 \`<regrets>\` 안에 "(이번 달은 두드러진 아쉬운 점 패턴 없음)" 만 적어라.
+
+## 예시
+
+<예시 입력>
+${REGRETS_FEW_SHOT_INPUT}
+</예시 입력>
+
+<예시 출력>
+${REGRETS_FEW_SHOT_OUTPUT}
+</예시 출력>`;
+
+function SOURCE_OVERVIEW_FOR_REGRETS() {
+  return `- <FE1_WEEKLY>: 본인이 매주 직접 적은 한 일/할 일/이슈·공유 (1차 자료)
+- <JIRA>: 본인 담당 티켓 (status 가 In Progress / On Hold / Backlog 인 것이 미완료 시그널)
+- <CONFLUENCE>: 본인 작성/수정 페이지
+- <SLACK>: FE1 활동 채널 본인 메시지/쓰레드 댓글`;
+}
+
+export const summarizeMonthlyRegrets = async (
+  rawText: string,
+  userName: string,
+  yearMonth: string
+): Promise<string | null> => {
+  if (!rawText.trim()) return null;
+
+  const userPrompt = `<대상>
+- 작성자: ${userName}
+- 기간: ${yearMonth}
+</대상>
+
+<실제 입력>
+${rawText}
+</실제 입력>`;
+
+  const raw = await callLlmText(REGRETS_SYSTEM_PROMPT, userPrompt, {
+    maxTokens: 4096,
+  });
+  if (!raw) {
+    console.error('[llm] monthly-regrets callLlmText 가 null 반환');
+    return null;
+  }
+  console.log('[llm] monthly-regrets raw 응답 (앞 500자):', raw.slice(0, 500));
+  const regrets = extractXmlTag(raw, 'regrets');
+  if (regrets === null) {
+    console.error('[llm] monthly-regrets <regrets> 태그 추출 실패. raw:', raw);
+    return null;
+  }
+  return regrets;
+};
+
 // ─── 위클리 리포트 (한 일 / 할 일 / 이슈·공유 통합 1회 호출) ────────
 
 export interface WeeklyReportSummary {

@@ -12,6 +12,7 @@ import { getActiveEpics } from './jira/epics';
 import {
   summarizeMonthlyAchievements,
   summarizeMonthlyJiraExecution,
+  summarizeMonthlyRegrets,
   summarizeThreadForBatchTicket,
   summarizeThreadToTicket,
   summarizeWeeklyReport,
@@ -1082,6 +1083,7 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
       `[worker] monthly-report 수집 완료: slack=${slackMessages.length} (실패채널 ${failedChannels.length}), confluence=${confluencePages.length}, jira=${jiraIssues.length}, fe1-weekly=${fe1Weekly.length}`,
     );
 
+    // 성과 입력: Slack + Confluence + FE1 위클리 (기존)
     const rawText = buildMonthlyInput(
       slackMessages,
       [],
@@ -1093,6 +1095,18 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
 
     const jiraTicketsBlock = buildJiraTicketsBlock(jiraIssues);
 
+    // 아쉬운 점 입력: 4 소스 cross-source (Jira 도 포함)
+    // - status In Progress/On Hold/Backlog 등 미완료 시그널이 회고에서 핵심
+    // - 위클리 "이슈/공유" + Jira status + Slack 논의 교차로 패턴 추출
+    const regretsRawText = buildMonthlyInput(
+      slackMessages,
+      jiraIssues,
+      confluencePages,
+      [],
+      fe1Weekly,
+      MONTHLY_MAX_INPUT_CHARS,
+    );
+
     if (!rawText.trim() && !jiraTicketsBlock.trim()) {
       await client.chat.postMessage({
         channel: p.triggerUserId,
@@ -1101,26 +1115,30 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
       return;
     }
 
-    // 성과(Q코드) 와 수행(Jira 그룹핑) 두 LLM 호출 병렬
-    const [achievementSummary, executionSummary] = await Promise.all([
-      rawText.trim()
-        ? summarizeMonthlyAchievements(
-            rawText,
-            userName,
-            `(Slack ${MONTHLY_REPORT_CHANNELS.length}개 + Confluence + FE1 위클리)`,
-            p.yearMonth,
-            {
-              slackMessageCount: slackMessages.length,
-              confluencePageCount: confluencePages.length,
-              jiraIssueCount: jiraIssues.length,
-              fe1WeeklyCount: fe1Weekly.length,
-            },
-          )
-        : Promise.resolve(null),
-      jiraTicketsBlock.trim()
-        ? summarizeMonthlyJiraExecution(jiraTicketsBlock, userName, p.yearMonth)
-        : Promise.resolve(null),
-    ]);
+    // 성과(Q코드) / 아쉬운 점(회고) / 수행(Jira 그룹핑) 세 LLM 호출 병렬
+    const [achievementSummary, regretsSummary, executionSummary] =
+      await Promise.all([
+        rawText.trim()
+          ? summarizeMonthlyAchievements(
+              rawText,
+              userName,
+              `(Slack ${MONTHLY_REPORT_CHANNELS.length}개 + Confluence + FE1 위클리)`,
+              p.yearMonth,
+              {
+                slackMessageCount: slackMessages.length,
+                confluencePageCount: confluencePages.length,
+                jiraIssueCount: jiraIssues.length,
+                fe1WeeklyCount: fe1Weekly.length,
+              },
+            )
+          : Promise.resolve(null),
+        regretsRawText.trim()
+          ? summarizeMonthlyRegrets(regretsRawText, userName, p.yearMonth)
+          : Promise.resolve(null),
+        jiraTicketsBlock.trim()
+          ? summarizeMonthlyJiraExecution(jiraTicketsBlock, userName, p.yearMonth)
+          : Promise.resolve(null),
+      ]);
 
     const sections: string[] = [];
     if (achievementSummary) {
@@ -1128,6 +1146,13 @@ const handleMonthlyReportWork = async (p: MonthlyReportWorkerPayload) => {
     } else if (rawText.trim()) {
       sections.push(
         '# 🏆 성과 (Q코드 기반)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.',
+      );
+    }
+    if (regretsSummary) {
+      sections.push(`# 🤔 아쉬운 점 (회고)\n\n${regretsSummary}`);
+    } else if (regretsRawText.trim()) {
+      sections.push(
+        '# 🤔 아쉬운 점 (회고)\n\n⚠️ LLM 요약 실패. 로그 확인 필요.',
       );
     }
     if (executionSummary) {
