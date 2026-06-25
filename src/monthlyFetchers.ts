@@ -77,6 +77,9 @@ const fetchSlackOneChannel = async (
     text?: string;
     reply_count?: number;
     reply_users?: string[];
+    // thread reply 가 채널에도 broadcast 된 경우 history 결과에 섞여 들어옴.
+    // 이 때 thread_ts !== ts 이며, permalink 에 `?thread_ts=&cid=` 가 필요.
+    thread_ts?: string;
   }> = [];
   let cursor: string | undefined;
   let errorMsg: string | undefined;
@@ -107,7 +110,9 @@ const fetchSlackOneChannel = async (
         ts: p.ts,
         text: p.text,
         date: tsToKstDate(p.ts),
-        permalink: buildSlackPermalink(channelId, p.ts),
+        // p.thread_ts 가 있으면 buildSlackPermalink 가 broadcast reply 케이스
+        // (thread_ts !== ts) 만 자동 감지해 thread_ts 쿼리를 붙임.
+        permalink: buildSlackPermalink(channelId, p.ts, p.thread_ts),
       });
       seenTs.add(p.ts);
     }
