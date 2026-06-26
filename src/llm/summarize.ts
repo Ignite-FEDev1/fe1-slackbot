@@ -1000,6 +1000,107 @@ ${rawText}
   return regrets;
 };
 
+// ─── 팀원별 슬랙 소통 요약 (with 커맨드) ────────────────────────────
+
+const TEAMMATE_FEW_SHOT_INPUT = `[2026-04-08 | <#C04D9PH8N5D> | https://ignite0830.slack.com/archives/C04D9PH8N5D/p1775000000000001]
+서성주: <@U04FBFS5SCX> 어제 공유한 BlackDuck 유예처리 가이드 보셨어요? 그룹공지 게시판 high 3건 중 1건은 false positive 같아서 보안팀 답변 기다리는 중입니다.
+
+[2026-04-08 | <#C04D9PH8N5D> | https://ignite0830.slack.com/archives/C04D9PH8N5D/p1775010000000002]
+손현지: 봤어요. false positive 케이스는 두레이로 D0754 발행해두는 게 맞을 것 같아요. 나머지 2건은 직접 의존성 버전업으로 처리하면 될 듯합니다.
+
+[2026-04-12 | <#C0617SQTU67> | https://ignite0830.slack.com/archives/C0617SQTU67/p1775200000000001]
+손현지: <@U04FUFTCGCC> 다국어 머지 충돌 개선안 B로 갈게요. download.ts 에 정렬+pretty-print 추가하는 방향. 0416 배포에 포함합니다.
+
+[2026-04-12 | <#C0617SQTU67> | https://ignite0830.slack.com/archives/C0617SQTU67/p1775210000000003]
+서성주: 좋아요. CI/CD 단계 의존성 안 늘리는 게 핵심이라 B안이 맞습니다. 머지 후 한 번 같이 확인해봐요.`;
+
+const TEAMMATE_FEW_SHOT_OUTPUT = `<interaction>
+### BlackDuck 취약점 유예처리 협의
+- false positive 1건 식별 → 두레이 D0754 발행 합의, 나머지 2건은 직접 의존성 버전업으로 처리 결정
+- https://ignite0830.slack.com/archives/C04D9PH8N5D/p1775010000000002
+
+### 다국어 머지 충돌 개선안 B 합의 (0416 배포)
+- download.ts 정렬+pretty-print 방향 확정. CI/CD 의존성 증가 없이 해결하는 게 핵심 근거
+- 머지 후 교차 확인 계획
+- https://ignite0830.slack.com/archives/C0617SQTU67/p1775200000000001
+</interaction>`;
+
+const TEAMMATE_SYSTEM_PROMPT = `너는 두 팀원이 한 달 동안 슬랙 채널에서 직접 주고받은 메시지·쓰레드를 받아,
+**두 사람이 어떤 주제로 협업/논의/도움을 주고받았는지** 핵심만 추려내는 보조다.
+
+## 입력 형식
+- 각 메시지: \`[YYYY-MM-DD | #채널 | Slack 영구링크]\` 헤더 다음 줄에 \`작성자: 본문\`.
+- 두 명(본인 + 대상 팀원)의 메시지만 들어있다. 시간순 정렬됨.
+- 같은 쓰레드의 연속 메시지가 함께 등장할 수 있다.
+
+## 추출 규칙
+- **둘 사이에 오간 의미 있는 협업/논의/결정/도움**만 주제별로 묶어 정리한다.
+- 잡담·짧은 인사·"확인", "ㅇㅋ", 감사 표현만 있는 메시지는 제외.
+- 비슷한 주제로 여러 번 오간 대화는 1개 항목으로 통합 (같은 쓰레드든 다른 날짜든).
+- 한쪽이 일방적으로 알린 공지/공유는 상대가 의미 있는 반응을 보였을 때만 포함.
+- 같은 쓰레드라도 정말 핵심 결정/액션만 잡고, 부수 대화는 버린다.
+
+## 분류·길이
+- 항목 3~8개. 패턴 없으면 더 적게.
+- 항목당: \`### 짧은 주제 한 줄\` + 불릿 1~3개 (관찰/결정/액션) + 결정적 permalink 1~2개.
+- 가능한 한 **결정·합의·결과**가 드러나게. 단순 질의응답이면 "→ 답변/해결" 형태로 압축.
+
+${STYLE_RULES}
+
+## 응답 형식
+반드시 아래 형식으로만 응답하라. 태그 바깥에 다른 텍스트(설명/인사/코드펜스)를 절대 넣지 마라:
+
+<interaction>
+### [주제]
+- 관찰/결정/액션 (명사형)
+- https://... (permalink)
+</interaction>
+
+추출할 만한 협업이 정말 없으면 \`<interaction>\` 안에 "(이번 달 직접 소통 내역 없음)" 만 적어라.
+
+## 예시
+
+<예시 입력 (본인=손현지, 상대=서성주)>
+${TEAMMATE_FEW_SHOT_INPUT}
+</예시 입력>
+
+<예시 출력>
+${TEAMMATE_FEW_SHOT_OUTPUT}
+</예시 출력>`;
+
+export const summarizeTeammateInteractions = async (
+  rawText: string,
+  meName: string,
+  teammateName: string,
+  yearMonth: string
+): Promise<string | null> => {
+  if (!rawText.trim()) return null;
+
+  const userPrompt = `<대상>
+- 본인: ${meName}
+- 대상 팀원: ${teammateName}
+- 기간: ${yearMonth}
+</대상>
+
+<실제 입력>
+${rawText}
+</실제 입력>`;
+
+  const raw = await callLlmText(TEAMMATE_SYSTEM_PROMPT, userPrompt, {
+    maxTokens: 3072,
+  });
+  if (!raw) {
+    console.error('[llm] teammate-interaction callLlmText 가 null 반환');
+    return null;
+  }
+  const out = extractXmlTag(raw, 'interaction');
+  if (out === null) {
+    console.error('[llm] teammate-interaction <interaction> 태그 추출 실패. raw:', raw);
+    return null;
+  }
+  return out;
+};
+
 // ─── 위클리 리포트 (한 일 / 할 일 / 이슈·공유 통합 1회 호출) ────────
 
 export interface WeeklyReportSummary {

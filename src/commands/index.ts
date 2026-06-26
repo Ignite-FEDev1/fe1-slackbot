@@ -9,6 +9,7 @@ import { monthlyReportCommand } from './monthlyReport';
 import { pingCommand } from './ping';
 import { weeklyCommand } from './weekly';
 import { weeklyReportCommand } from './weeklyReport';
+import { withTeammatesCommand } from './withTeammates';
 import { Command } from './types';
 
 /**
@@ -25,6 +26,7 @@ export const commands: Command[] = [
   weeklyReportCommand,
   dailySummaryCommand,
   monthlyReportCommand,
+  withTeammatesCommand,
   pingCommand,
   buildHelpCommand(() => commands),
 ];

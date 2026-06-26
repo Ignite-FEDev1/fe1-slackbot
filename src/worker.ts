@@ -13,11 +13,16 @@ import {
   summarizeMonthlyAchievements,
   summarizeMonthlyJiraExecution,
   summarizeMonthlyRegrets,
+  summarizeTeammateInteractions,
   summarizeThreadForBatchTicket,
   summarizeThreadToTicket,
   summarizeWeeklyReport,
   SummarizeContext,
 } from './llm/summarize';
+import {
+  fetchTeammateInteractions,
+  type InteractionMessage,
+} from './teammateFetchers';
 import {
   buildCreateTicketModalView,
   getSlackDisplayName,
@@ -163,6 +168,12 @@ export interface WeeklyReportWorkerPayload {
   weekMonday: string;
 }
 
+export interface WithTeammatesWorkerPayload {
+  type: 'with_teammates_work';
+  triggerUserId: string;
+  yearMonth: string; // "2026-04"
+}
+
 /** 단일 티켓 모달 초기 LLM 요약 + 모달 update */
 export interface InitTicketModalWorkerPayload {
   type: 'init_ticket_modal_work';
@@ -191,6 +202,7 @@ export type WorkerPayload =
   | ExtBatchTicketWorkerPayload
   | MonthlyReportWorkerPayload
   | WeeklyReportWorkerPayload
+  | WithTeammatesWorkerPayload
   | InitTicketModalWorkerPayload
   | InitBatchTicketModalWorkerPayload;
 
@@ -1386,6 +1398,205 @@ const buildMonthlyInput = (
   return sections.join('\n\n');
 };
 
+// ─── 팀원별 슬랙 소통 worker (/fe1 with) ──────────────────────────
+
+// 팀원 1명당 LLM 입력 budget. Sonnet 200K context + 6~7명 팀원 동시 호출이라
+// 한 명당 25K chars (~7K tokens) 정도면 충분.
+const WITH_TEAMMATE_MAX_INPUT_CHARS = 25000;
+
+const buildTeammateInputBlock = (
+  messages: InteractionMessage[],
+  budget: number,
+  resolveUserName: (uid: string) => string
+): { text: string; usedCount: number } => {
+  if (messages.length === 0) return { text: '', usedCount: 0 };
+
+  const buildOne = (m: InteractionMessage) =>
+    `[${m.date} | <#${m.channelId}> | ${m.permalink}]\n${resolveUserName(m.userId)}: ${m.text}\n\n`;
+
+  // 길이순 desc 로 우선 선택 → 시간순 재정렬
+  const byLen = [...messages].sort((a, b) => b.text.length - a.text.length);
+  const selected = new Set<string>();
+  let used = 0;
+  for (const m of byLen) {
+    const block = buildOne(m);
+    if (used + block.length > budget) continue;
+    selected.add(`${m.channelId}:${m.ts}`);
+    used += block.length;
+  }
+  if (selected.size === 0) return { text: '', usedCount: 0 };
+
+  const sorted = [...messages].sort(
+    (a, b) => parseFloat(a.ts) - parseFloat(b.ts)
+  );
+  const text = sorted
+    .filter((m) => selected.has(`${m.channelId}:${m.ts}`))
+    .map(buildOne)
+    .join('');
+  return { text, usedCount: selected.size };
+};
+
+const handleWithTeammatesWork = async (p: WithTeammatesWorkerPayload) => {
+  try {
+    const range = buildKstMonthRange(p.yearMonth);
+
+    const userInfoPromise = client.users
+      .info({ user: p.triggerUserId })
+      .catch(() => null);
+
+    const teammateIds = Object.keys(SLACK_USER_NAMES).filter(
+      (uid) => uid !== p.triggerUserId
+    );
+    if (teammateIds.length === 0) {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `❌ 분석 대상 팀원이 없습니다. constant.ts 의 SLACK_USER_NAMES 를 확인해주세요.`,
+      });
+      return;
+    }
+
+    const interactionPromise = fetchTeammateInteractions(
+      client,
+      MONTHLY_REPORT_CHANNELS,
+      p.triggerUserId,
+      teammateIds,
+      range
+    );
+
+    const [userInfo, interaction] = await Promise.all([
+      userInfoPromise,
+      interactionPromise,
+    ]);
+
+    const meName =
+      userInfo?.user?.profile?.display_name ||
+      userInfo?.user?.real_name ||
+      p.triggerUserId;
+
+    const resolveUserName = (uid: string): string => {
+      if (uid === p.triggerUserId) return meName;
+      return SLACK_USER_NAMES[uid] ?? uid;
+    };
+
+    console.log(
+      `[worker] with 수집 완료: 팀원 ${teammateIds.length}명, 실패채널 ${interaction.failedChannels.length}, 총 메시지 ${Object.values(
+        interaction.byTeammateId
+      ).reduce((acc, arr) => acc + arr.length, 0)}건`
+    );
+
+    // 팀원별 LLM 요약 병렬 호출 (메시지 있는 팀원만)
+    const summaries = await Promise.all(
+      teammateIds.map(async (teammateId) => {
+        const msgs = interaction.byTeammateId[teammateId] ?? [];
+        const teammateName = SLACK_USER_NAMES[teammateId] ?? teammateId;
+        if (msgs.length === 0) {
+          return { teammateId, teammateName, count: 0, summary: null as string | null };
+        }
+        const { text, usedCount } = buildTeammateInputBlock(
+          msgs,
+          WITH_TEAMMATE_MAX_INPUT_CHARS,
+          resolveUserName
+        );
+        const truncNote =
+          usedCount < msgs.length
+            ? `\n(전체 ${msgs.length}건 중 ${usedCount}건만 분석)`
+            : '';
+        const summary = await summarizeTeammateInteractions(
+          text,
+          meName,
+          teammateName,
+          p.yearMonth
+        );
+        return {
+          teammateId,
+          teammateName,
+          count: msgs.length,
+          summary: summary ? `${summary}${truncNote}` : null,
+        };
+      })
+    );
+
+    // 본문: 메시지 있던 팀원 우선, 그 외는 "직접 소통 내역 없음"
+    const haveAny = summaries.some((s) => s.count > 0);
+    if (!haveAny) {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `👥 *${meName}의 ${p.yearMonth} 팀원별 커뮤니케이션* — 직접 소통 내역 없음`,
+      });
+      return;
+    }
+
+    // 정렬: 메시지 많은 순
+    const withMsgs = summaries.filter((s) => s.count > 0);
+    withMsgs.sort((a, b) => b.count - a.count);
+    const noMsgs = summaries.filter((s) => s.count === 0);
+
+    const sections: string[] = [];
+    for (const s of withMsgs) {
+      const body = s.summary ?? '⚠️ LLM 요약 실패. 로그 확인 필요.';
+      sections.push(`## 👤 ${s.teammateName} (${s.count}건)\n\n${body}`);
+    }
+    if (noMsgs.length > 0) {
+      const names = noMsgs.map((s) => s.teammateName).join(', ');
+      sections.push(`## 🕊 직접 소통 없음\n\n${names}`);
+    }
+    const finalBody = sections.join('\n\n---\n\n');
+
+    const statsParts = [
+      `팀원 ${teammateIds.length}명 분석`,
+      `총 ${withMsgs.reduce((acc, s) => acc + s.count, 0)}건 상호작용`,
+    ];
+    if (interaction.failedChannels.length > 0) {
+      const formatted = interaction.failedChannels
+        .map(
+          (f) => `<#${f.channelId}> (${describeSlackChannelError(f.reason)})`
+        )
+        .join(', ');
+      statsParts.push(
+        `⚠️ Slack ${interaction.failedChannels.length}채널 미수집: ${formatted}`
+      );
+    }
+    const statsLine = `📝 수집: ${statsParts.join(' · ')}`;
+
+    const dmBlocks: any[] = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `👥 *${meName}의 ${p.yearMonth} 팀원별 커뮤니케이션*`,
+        },
+      },
+      { type: 'divider' },
+      ...splitForSlackBlocks(finalBody).map((text) => ({
+        type: 'section' as const,
+        text: { type: 'mrkdwn' as const, text },
+      })),
+      { type: 'divider' },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: statsLine }],
+      },
+    ];
+
+    await client.chat.postMessage({
+      channel: p.triggerUserId,
+      text: `${meName}의 ${p.yearMonth} 팀원별 커뮤니케이션`,
+      blocks: dmBlocks,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[worker] with 실패:', msg);
+    try {
+      await client.chat.postMessage({
+        channel: p.triggerUserId,
+        text: `❌ 팀원 커뮤니케이션 분석 실패: ${msg}`,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+};
+
 // ─── 위클리 리포트 worker ──────────────────────────────────────────
 
 const WEEKLY_MAX_INPUT_CHARS = 80000;
@@ -1728,6 +1939,7 @@ const WORKER_HANDLERS = {
   ext_batch_ticket_work: handleExtBatchTicketWork,
   monthly_report_work: handleMonthlyReportWork,
   weekly_report_work: handleWeeklyReportWork,
+  with_teammates_work: handleWithTeammatesWork,
   init_ticket_modal_work: handleInitTicketModalWork,
   init_batch_ticket_modal_work: handleInitBatchTicketModalWork,
 } satisfies WorkerHandlers;
