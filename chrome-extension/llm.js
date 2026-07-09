@@ -1,6 +1,7 @@
-// Anthropic Claude Messages API 직접 호출 모듈.
-// 호출 실패 시 throw 만 하고, 폴백 처리는 popup.js 에서 담당한다.
-// 401/403 은 키 설정 문제이므로 isAuthError 로 표시한다.
+// h-chat (사내망 Claude Messages API) 호출 모듈.
+// 호출 실패 시 throw 만 하고, 폴백 처리는 popup.js 의 summarizeWithFallback 에서 담당한다.
+//
+// 401/403 은 키 설정 문제이므로 isAuthError 로 표시해서 폴백 대상에서 제외한다.
 
 (function (global) {
   const STYLE_RULES = `## [절대 규칙] 문체
@@ -53,7 +54,7 @@ ${SELF_CONTAINED_RULES}
 ${RESPONSE_FORMAT}
 컨텍스트에 담당자가 명시되어 있으면, 담당자의 관점에서 해당 인물이 할 작업만 제목/본문에 담아라.`;
 
-  // ─── JSON 추출/복구 ────────────────────────────────────────────
+  // ─── JSON 추출/복구 (백엔드 src/llm/client.ts 로직 포트) ────────
 
   const canParse = (s) => {
     try {
@@ -147,12 +148,12 @@ ${RESPONSE_FORMAT}
     return trimmed;
   };
 
-  // ─── Anthropic 호출 ────────────────────────────────────────────
+  // ─── h-chat 호출 ───────────────────────────────────────────────
 
-  class LLMError extends Error {
+  class HChatError extends Error {
     constructor(message, { status, isAuthError } = {}) {
       super(message);
-      this.name = 'LLMError';
+      this.name = 'HChatError';
       this.status = status;
       this.isAuthError = !!isAuthError;
     }
@@ -166,28 +167,62 @@ ${RESPONSE_FORMAT}
         return { title: parsed.title, description: parsed.description };
       }
     } catch (e) {
-      console.error('[anthropic] 응답 JSON 파싱 실패:', raw);
+      console.error('[hchat] 응답 JSON 파싱 실패:', raw);
     }
     return null;
   };
 
-  const callAnthropic = async (systemPrompt, userPrompt) => {
-    const apiKey = CONFIG.ANTHROPIC_API_KEY;
-    const model = CONFIG.ANTHROPIC_MODEL;
+  // h-chat API Key 는 git 에 두지 않고 Lambda(/api/hchat-credentials) 를 통해 Supabase 에서 받아온다.
+  // popup 메모리에 한 번만 캐싱 — popup 닫히면 자동 무효화되므로 키 회전 즉시 반영.
+  let _cachedHChatApiKey = null;
 
-    if (!apiKey) {
-      throw new LLMError('ANTHROPIC_API_KEY 미설정 (config.js 확인)', { isAuthError: true });
-    }
+  const fetchHChatApiKey = async () => {
+    if (_cachedHChatApiKey) return _cachedHChatApiKey;
 
     let res;
     try {
-      res = await fetch('https://api.anthropic.com/v1/messages', {
+      res = await fetch(`${CONFIG.API_URL}/api/hchat-credentials`, {
+        method: 'GET',
+        headers: { 'x-api-key': CONFIG.API_KEY },
+      });
+    } catch (e) {
+      throw new HChatError(`h-chat 자격증명 fetch 네트워크 오류: ${e.message}`);
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      if (res.status === 401 || res.status === 403) {
+        throw new HChatError(`자격증명 조회 인증 실패 (${res.status}): EXTENSION_API_KEY 확인`, {
+          status: res.status,
+          isAuthError: true,
+        });
+      }
+      throw new HChatError(`자격증명 조회 HTTP ${res.status}: ${body.slice(0, 200)}`, { status: res.status });
+    }
+
+    const data = await res.json();
+    if (!data || !data.apiKey) {
+      throw new HChatError('자격증명 응답에 apiKey 없음');
+    }
+    _cachedHChatApiKey = data.apiKey;
+    return _cachedHChatApiKey;
+  };
+
+  const callHChat = async (systemPrompt, userPrompt) => {
+    const baseUrl = CONFIG.H_CHAT_BASE_URL;
+    const model = CONFIG.H_CHAT_MODEL;
+    if (!baseUrl || !model) {
+      throw new HChatError('H_CHAT 설정 누락 (config.js 확인)');
+    }
+    const apiKey = await fetchHChatApiKey();
+
+    let res;
+    try {
+      res = await fetch(`${baseUrl}/v3/claude/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
+          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model,
@@ -200,34 +235,34 @@ ${RESPONSE_FORMAT}
         }),
       });
     } catch (e) {
-      throw new LLMError(`네트워크 오류: ${e.message}`);
+      throw new HChatError(`네트워크 오류 (사내망 미접속 가능성): ${e.message}`);
     }
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.error(`[anthropic] HTTP ${res.status} body=${body.slice(0, 500)}`);
+      console.error(`[hchat] HTTP ${res.status} body=${body.slice(0, 500)}`);
       if (res.status === 401 || res.status === 403) {
-        throw new LLMError(`Anthropic 인증 실패 (${res.status}): API 키 확인`, {
+        throw new HChatError(`h-chat 인증 실패 (${res.status}): ${body.slice(0, 200)}`, {
           status: res.status,
           isAuthError: true,
         });
       }
-      throw new LLMError(`Anthropic HTTP ${res.status}: ${body.slice(0, 200)}`, { status: res.status });
+      throw new HChatError(`h-chat HTTP ${res.status}: ${body.slice(0, 200)}`, { status: res.status });
     }
 
     const data = await res.json();
     const block = (data.content || []).find((b) => b.type === 'text');
     if (!block || !block.text) {
-      throw new LLMError('Anthropic 응답에 text 블록 없음');
+      throw new HChatError('h-chat 응답에 text 블록 없음');
     }
     return extractJsonObject(block.text);
   };
 
   // ─── 외부 노출 API ────────────────────────────────────────────
 
-  global.LLMError = LLMError;
+  global.HChatError = HChatError;
 
-  global.summarizeViaLLM = async (text, ctx = {}) => {
+  global.summarizeViaHChat = async (text, ctx = {}) => {
     if (!text || !text.trim()) return null;
 
     const contextLines = [];
@@ -243,9 +278,9 @@ ${RESPONSE_FORMAT}
     const system = buildSystemPrompt();
     const user = `${buildContextBlock(contextLines)}<선택한 텍스트>\n${text}\n</선택한 텍스트>`;
 
-    const raw = await callAnthropic(system, user);
+    const raw = await callHChat(system, user);
     const draft = parseTicketDraft(raw);
-    if (!draft) throw new LLMError('Anthropic 응답 파싱 실패');
+    if (!draft) throw new HChatError('h-chat 응답 파싱 실패');
     return draft;
   };
 })(window);

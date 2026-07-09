@@ -6,11 +6,21 @@
   "permissions": [
     "contextMenus",
     "storage",
-    "activeTab"
+    "activeTab",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
-    "https://api.anthropic.com/*"
+    "https://internal-apigw-kr.hmg-corp.io/*"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "hchat-cors",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "background": {
     "service_worker": "background.js"
   },

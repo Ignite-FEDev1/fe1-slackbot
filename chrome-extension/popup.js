@@ -36,10 +36,35 @@ const showStatus = (id, cls, text) => {
 
 const ESTIMATE_PATTERN = /^(\d+\.?\d*)(d|m|w|h)$/i;
 
-// ─── LLM 요약 ─────────────────────────────────────────────────
-const summarize = async (text, ctx) => {
-  const draft = await summarizeViaLLM(text, ctx);
-  return { draft };
+// ─── h-chat → Anthropic 폴백 ───────────────────────────────────
+// 1순위: 사내망 h-chat (Personal API Key 공용 사용)
+// 폴백: Lambda /api/summarize (Anthropic Haiku) — 외부망/사내 장애 시
+// 401/403 은 키 설정 문제이므로 폴백 안 하고 그대로 에러 노출
+const summarizeWithFallback = async (text, ctx) => {
+  try {
+    const draft = await summarizeViaHChat(text, ctx);
+    return { draft, source: 'hchat' };
+  } catch (e) {
+    if (e instanceof HChatError && e.isAuthError) throw e;
+    console.warn('[summarize] h-chat 실패, Anthropic 폴백:', e.message);
+    const res = await api('/api/summarize', {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        sourceUrl: ctx.sourceUrl,
+        assigneeName: ctx.assigneeName,
+        instructions: ctx.instructions,
+      }),
+    });
+    return { draft: res.draft, source: 'fallback', fallbackReason: e.message };
+  }
+};
+
+const showFallbackNotice = (show, reason) => {
+  const el = $('fallbackNotice');
+  if (!el) return;
+  el.style.display = show ? 'block' : 'none';
+  if (show && reason) el.title = reason;
 };
 
 // ─── 모드 전환 ─────────────────────────────────────────────────
@@ -94,7 +119,7 @@ const init = async () => {
   // 모든 상태 숨기기
   ['noConfig', 'noText', 'loading', 'result'].forEach(hide);
 
-  if (!apiUrl || !apiKey || apiUrl.includes('xxxxxxxxxx') || !CONFIG.ANTHROPIC_API_KEY) {
+  if (!apiUrl || !apiKey || apiUrl.includes('xxxxxxxxxx')) {
     show('noConfig');
     return;
   }
@@ -121,7 +146,7 @@ const init = async () => {
     const [epicsRes, membersRes, summarizeResult] = await Promise.all([
       api('/api/epics'),
       api('/api/members'),
-      summarize(pendingTicket.text, { sourceUrl: pendingTicket.sourceUrl }),
+      summarizeWithFallback(pendingTicket.text, { sourceUrl: pendingTicket.sourceUrl }),
     ]);
 
     // 에픽
@@ -151,6 +176,8 @@ const init = async () => {
       $('title').value = summarizeResult.draft.title || '';
       $('description').value = summarizeResult.draft.description || '';
     }
+    showFallbackNotice(summarizeResult.source === 'fallback', summarizeResult.fallbackReason);
+
     hide('loading');
     setFormDisabled(false);
   } catch (e) {
@@ -183,7 +210,7 @@ $('resummarize').addEventListener('click', async () => {
         : undefined;
     const instructions = $('instructions').value.trim() || undefined;
 
-    const summarizeResult = await summarize(pendingTicket.text, {
+    const summarizeResult = await summarizeWithFallback(pendingTicket.text, {
       sourceUrl: pendingTicket.sourceUrl,
       assigneeName: assigneeName === '선택 안 함' ? undefined : assigneeName,
       instructions,
@@ -193,6 +220,7 @@ $('resummarize').addEventListener('click', async () => {
       $('title').value = summarizeResult.draft.title || '';
       $('description').value = summarizeResult.draft.description || '';
     }
+    showFallbackNotice(summarizeResult.source === 'fallback', summarizeResult.fallbackReason);
 
     hide('loading');
     setFormDisabled(false);
