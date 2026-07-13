@@ -41,6 +41,9 @@ functions:
     memorySize: 1024
     # 비동기 invoke 실패 시 자동 재시도 끔 (타임아웃 시 같은 작업 재실행 방지)
     maximumRetryAttempts: 0
+    # Function URL — API Gateway 대체용 무료 엔드포인트 (병행 운영 후 http events 제거 예정)
+    # CORS 는 URL 레이어에 맡기지 않고 기존처럼 코드(router.ts)에서 처리 (중복 헤더 방지)
+    url: true
     events:
       - http:
           path: slack/events
@@ -49,6 +52,20 @@ functions:
           path: api/{proxy+}
           method: any
           cors: true
+
+resources:
+  Resources:
+    # 2025-10 부터 AWS 가 Function URL 공개 호출에 lambda:InvokeFunctionUrl 외에
+    # lambda:InvokeFunction 허용도 요구함. serverless v3 는 전자만 만들어주므로 (없으면 403)
+    # 후자를 여기서 명시. InvokedViaFunctionUrl 조건으로 URL 경유 호출만 허용.
+    SlackFnUrlPublicInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName:
+          Ref: SlackLambdaFunction
+        Action: lambda:InvokeFunction
+        Principal: '*'
+        InvokedViaFunctionUrl: true
 
 plugins:
   - serverless-offline

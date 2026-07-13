@@ -25,12 +25,19 @@ export const handler = async (event: any, context: any, callback: any) => {
   }
 
   // REST API 요청 (/api/*) 처리
-  if (event?.path?.startsWith('/api/')) {
+  // API Gateway REST(v1: path/httpMethod)와 Lambda Function URL(v2: rawPath/requestContext) 겸용
+  const apiPath = event?.path ?? event?.rawPath;
+  const apiMethod = event?.httpMethod ?? event?.requestContext?.http?.method;
+  if (apiPath?.startsWith('/api/')) {
+    const rawBody =
+      event.body && event.isBase64Encoded
+        ? Buffer.from(event.body, 'base64').toString()
+        : event.body;
     return handleApiRequest({
-      path: event.path,
-      method: event.httpMethod,
+      path: apiPath,
+      method: apiMethod,
       headers: event.headers || {},
-      body: event.body ? JSON.parse(event.body) : {},
+      body: rawBody ? JSON.parse(rawBody) : {},
     });
   }
 
