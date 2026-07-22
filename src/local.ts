@@ -1,8 +1,8 @@
+// dotenv 를 다른 import 보다 먼저 실행해야 함 —
+// register.ts 체인의 db.ts 가 모듈 로드 시점에 process.env 를 읽는다
+import 'dotenv/config';
 import { App, ExpressReceiver } from '@slack/bolt';
-import dotenv from 'dotenv';
 import { registerApp } from './register';
-
-dotenv.config();
 
 const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET || '',
