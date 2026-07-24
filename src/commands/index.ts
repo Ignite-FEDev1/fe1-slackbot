@@ -1,5 +1,6 @@
 import { batchTicketCommand } from './batchTicket';
 import { batchTicketUpdateCommand } from './batchTicketUpdate';
+import { cpoBoMenuNewCommand } from './cpoBoMenuNew';
 import { createTicketCommand } from './createTicket';
 import { dailySummaryCommand } from './dailySummary';
 import { deployRoomCommand } from './deployRoom';
@@ -27,6 +28,7 @@ export const commands: Command[] = [
   dailySummaryCommand,
   monthlyReportCommand,
   withTeammatesCommand,
+  cpoBoMenuNewCommand,
   pingCommand,
   buildHelpCommand(() => commands),
 ];
