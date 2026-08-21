@@ -1,6 +1,6 @@
 import { Command } from "./types";
 
-const TEMPLATE_TEXT = `@ 박범진 님 안녕하세요 cc. @fe-bo
+const TEMPLATE_TEXT = `@ 박범진 님 안녕하세요 cc. @ 조민근 @fe-bo 
 \`{메뉴명}\` - 운영계 메뉴 추가 부탁드립니다.
 (\`{배포일 및 사유}\`로 운영 선등록 요청드리는 메뉴입니다.)
 
@@ -13,9 +13,8 @@ const TEMPLATE_TEXT = `@ 박범진 님 안녕하세요 cc. @fe-bo
   • 읽기 - 권한명: 읽기, 권한코드: \`{읽기 권한코드}\`
   • 쓰기 - 권한명: 쓰기, 권한코드: \`{쓰기 권한코드}\`
 
-@ 조민근 님
-권한 관리 엑셀 갱신 부탁드립니다.
-https://ignitecorp.atlassian.net/wiki/spaces/CPO/pages/317653090/BO
+신규 BO 메뉴 관리 페이지: https://ignitecorp.atlassian.net/wiki/spaces/CPO/pages/2797600950/BO
+(기재되어있지 않을 경우 갱신 필요)
 
 💡 예시
 • 배포일 및 사유: 260723 정기배포
