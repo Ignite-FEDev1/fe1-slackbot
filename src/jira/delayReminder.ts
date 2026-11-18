@@ -72,7 +72,7 @@ export const buildDelayMessages = (
   );
   const sections = [
     {
-      title: '[ 시작일이 지체되었어요 ]',
+      title: '*[ 시작일이 지체되었어요 ]*',
       issues: openIssues.filter(
         ({ fields }) =>
           fields.status.statusCategory.key === 'new' &&
@@ -81,7 +81,7 @@ export const buildDelayMessages = (
       ),
     },
     {
-      title: '[ 종료 현황을 확인해주세요 ]',
+      title: '*[ 종료 현황을 확인해주세요 ]*',
       issues: openIssues.filter(
         ({ fields }) => fields.duedate && fields.duedate <= today
       ),
@@ -113,13 +113,13 @@ export const buildDelayMessages = (
       let first = true;
       for (const issue of group.issues) {
         const line =
-          `  - <${buildIssueUrl(issue.key)}|${issue.key}> ` +
+          `  • <${buildIssueUrl(issue.key)}|${issue.key}> ` +
           escapeSlack(issue.fields.summary.replace(/[\r\n]+/g, ' '));
-        let addition = `${first ? `\n- ${group.mention}` : ''}\n${line}`;
+        let addition = `${first ? `\n\n*${group.mention}*` : ''}\n${line}`;
         if (text.length + addition.length > MAX_MESSAGE_LENGTH) {
           messages.push(text);
           text = section.title;
-          addition = `\n- ${group.mention}\n${line}`;
+          addition = `\n\n*${group.mention}*\n${line}`;
         }
         text += addition;
         first = false;

@@ -70,9 +70,15 @@ test('groups by assignee, mentions mapped users, escapes text and retains both d
   ], today);
   assert.equal(message.split(`<@${slackId}>`).length - 1, 2);
   assert.equal(message.split('|FEHG-1>').length - 1, 2);
+  assert.ok(message.startsWith(
+    `*[ 시작일이 지체되었어요 ]*\n\n*<@${slackId}>*\n` +
+    '  • <https://ignitecorp.atlassian.net/browse/FEHG-1|FEHG-1> Summary FEHG-1\n' +
+    '  • <https://ignitecorp.atlassian.net/browse/FEHG-2|FEHG-2> '
+  ));
   assert.match(message, /A &amp; B &lt;@UINJECTED&gt; next line/);
-  assert.match(message, /- Unknown &lt;user&gt;/);
-  assert.match(message, /- 담당자 없음/);
+  assert.match(message, /\n\n\*Unknown &lt;user&gt;\*\n  • /);
+  assert.match(message, /\n\n\*담당자 없음\*\n  • /);
+  assert.doesNotMatch(message, /^\s*-/m);
   assert.match(message, /<https:\/\/ignitecorp\.atlassian\.net\/browse\/FEHG-2\|FEHG-2>/);
 });
 
@@ -87,8 +93,9 @@ test('splits large reports without dropping issues or assignee context', () => {
   assert.ok(messages.length > 1);
   for (const message of messages) {
     assert.ok(message.length <= 35000);
-    assert.match(message, /^\[ 종료 현황을 확인해주세요 \]/);
-    assert.ok(message.includes(`<@${slackId}>`));
+    assert.ok(message.startsWith(
+      `*[ 종료 현황을 확인해주세요 ]*\n\n*<@${slackId}>*\n  • `
+    ));
   }
   assert.equal(messages.join('\n').match(/\|FEHG-\d+>/g)?.length, 300);
 });
