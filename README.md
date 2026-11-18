@@ -19,9 +19,36 @@ FE1 팀 업무를 Slack 안에서 처리해주는 봇입니다. `/fe1` 슬래시
 
 이 외에 Chrome Extension 용 API(`/api/*`)도 같은 Lambda 에서 서빙합니다.
 
+### Jira 일정 지체 알림 (GitHub Actions)
+
+`.github/workflows/jira-delay-reminder.yml`이 월~금 오후 5시(KST)에 실행됩니다.
+AWS를 거치지 않고 Jira 조회 후 Slack 채널 `C04HYKFMXT2`로 발송합니다.
+GitHub 예약 실행은 지연될 수 있습니다. 공휴일도 실행합니다.
+
+- 시작일(`customfield_10015`)이 오늘보다 과거이고 To Do 상태 범주인 FEHG 티켓을 알립니다.
+- 종료일(`duedate`)이 오늘 이하이고 Done 상태 범주가 아닌 FEHG 티켓을 알립니다.
+- 날짜는 한국 시간 기준입니다. 해당 날짜가 없는 티켓은 그 조건에서 제외합니다.
+- 담당자별로 묶고 `SLACK_JIRA_USER_MAP`으로 멘션합니다. 매핑이 없으면 Jira 표시 이름을 씁니다. 미할당 티켓은 `담당자 없음`으로 표시합니다.
+- 두 조건에 모두 해당하면 두 구역에 각각 표시합니다. 대상 티켓이 없으면 발송하지 않습니다.
+
+**활성화:** 저장소 Settings → Secrets and variables → Actions에 `ATLASSIAN_TOKEN`과
+`SLACK_BOT_TOKEN`을 등록하세요. Jira 토큰은 `JIRA_CONFIG.EMAIL` 계정의 토큰을 쓰세요.
+봇을 대상 채널에 초대하세요. Workflow를 기본 브랜치에 반영해야 예약 실행합니다.
+Lambda 배포는 필요 없습니다.
+
+Actions → Jira delay reminder → Run workflow에서 수동 실행할 수 있습니다.
+`dry_run` 기본값은 `true`입니다. 이때 메시지를 실행 로그에만 출력합니다.
+`false`로 실행하면 채널에 실제 발송합니다. 예약 실행은 실제 발송합니다.
+
+```bash
+npm run test:jira-delays
+DRY_RUN=true npm run remind:jira-delays # .env의 Jira 토큰으로 조회, Slack 발송 없음
+```
+
 ## ⚠️ 개발 & 테스트 — 반드시 읽기
 
-**이 봇은 로컬에서 테스트할 수 없습니다. 배포해서 Slack 에서 직접 확인하는 것이 유일한 테스트 방법입니다.**
+**슬래시 커맨드와 모달 등 Slack 상호작용은 배포 후 Slack에서 직접 확인해야 합니다.**
+Jira 일정 지체 알림은 위의 단위 테스트와 미리보기 명령으로 확인할 수 있습니다.
 
 - 봇은 화면이 없습니다. 모든 결과물(모달, 쓰레드 답글, DM)은 Slack 안에서 확인합니다.
 - 로컬 서버(`npm run dev`)를 띄워도 Slack 이 사내 VPN 안의 내 컴퓨터로 이벤트를 보낼 방법이 없습니다 (ngrok 사용 불가 환경).
