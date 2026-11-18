@@ -11,7 +11,9 @@
     "build:local": "esbuild src/local.ts --bundle --platform=node --outfile=local.js --format=cjs",
     "dev": "npm run build:local && node local.js",
     "dev:watch": "npm run build:local -- --watch & node --watch local.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:jira-delays": "node --test -r ts-node/register src/jira/delayReminder.test.ts",
+    "remind:jira-delays": "ts-node src/jobs/jiraDelayReminder.ts"
   },
   "author": "",
   "license": "ISC",
