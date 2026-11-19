@@ -1,0 +1,38 @@
+name: FrontEnd security news
+
+on:
+  schedule:
+    # 09:00 Asia/Seoul every day, including weekends.
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview only (do not send to Slack or save state)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: security-news
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:security-news
+      - run: npm run notify:security-news
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SECURITY_NEWS_SLACK_CHANNEL: C0ALN3RU92R
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
