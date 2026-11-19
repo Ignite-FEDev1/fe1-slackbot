@@ -1,8 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import axios from 'axios';
+import axios, { AxiosError, AxiosHeaders } from 'axios';
 import {
-  Advisory, advisoryNews, collectNews, fetchAdvisories, fetchNodeNews,
+  Advisory, advisoryNews, collectNews, fetchAdvisories, fetchNodeNews, formatNewsError,
   NewsPost, NewsState, nodeArticleNews, nodeFeedArticles, SecurityNews, sendNews,
 } from './news';
 
@@ -72,8 +72,8 @@ test('fetches both severities and follows GitHub cursor pagination', async () =>
     const { severity, after } = config.params;
     calls.push(`${severity}:${after ?? ''}`);
     assert.equal(config.params.ecosystem, 'npm');
-    assert.equal(config.params.modified, '>=2026-11-01T00:00:00Z');
-    assert.ok(config.params.affects.includes('react-server-dom-webpack'));
+    assert.equal(config.params.modified, '>=2026-11-01');
+    assert.equal(config.params.affects, undefined);
     return {
       config, status: 200, statusText: 'OK',
       headers: severity === 'critical' && !after
@@ -81,8 +81,28 @@ test('fetches both severities and follows GitHub cursor pagination', async () =>
       data: [advisory({ ghsa_id: `${severity}-${after ?? 'first'}` })],
     };
   } });
-  assert.equal((await fetchAdvisories('2026-11-01T00:00:00Z', client)).length, 3);
+  assert.equal((await fetchAdvisories('2026-11-01T00:00:00.123Z', client)).length, 3);
   assert.deepEqual(calls, ['critical:', 'critical:next-page', 'high:']);
+});
+
+test('reports API endpoint and validation details without request credentials or query values', () => {
+  const config = {
+    method: 'get', url: '/advisories?secret=hidden-query',
+    baseURL: 'https://api.github.com',
+    headers: new AxiosHeaders({ Authorization: 'Bearer hidden-token' }),
+  };
+  const error = new AxiosError('Request failed with status code 422', undefined,
+    config, undefined, {
+      status: 422, statusText: 'Unprocessable Entity', headers: {}, config,
+      data: {
+        message: 'Validation Failed',
+        errors: [{ field: 'modified', code: 'invalid', message: 'Invalid date format' }],
+      },
+    });
+  assert.equal(formatNewsError(error),
+    'GET https://api.github.com/advisories: HTTP 422: Validation Failed (modified:invalid:Invalid date format)');
+  assert.doesNotMatch(formatNewsError(error), /hidden-query|hidden-token|Authorization/);
+  assert.equal(formatNewsError(new Error('Slack unavailable')), 'Slack unavailable');
 });
 
 test('rejects repeated pagination cursors instead of returning a partial report', async () => {
@@ -137,7 +157,7 @@ test('overlaps collection windows, removes sent items and propagates source fail
     sent: { [sent.id]: sent.fingerprint },
   };
   const github = axios.create({ adapter: async (config) => {
-    assert.equal(config.params.modified, '>=2026-11-17T00:00:00.000Z');
+    assert.equal(config.params.modified, '>=2026-11-17');
     return { config, status: 200, statusText: 'OK', headers: {}, data: [advisory()] };
   } });
   const node = axios.create({ adapter: async (config) => ({

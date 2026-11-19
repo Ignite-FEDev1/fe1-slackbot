@@ -69,6 +69,7 @@ export const fetchAdvisories = async (
   client: AxiosInstance = axios
 ): Promise<SecurityNews[]> => {
   const news: SecurityNews[] = [];
+  const sinceDate = new Date(since).toISOString().slice(0, 10);
   for (const severity of ['critical', 'high']) {
     let after: string | undefined;
     const seen = new Set<string>();
@@ -76,7 +77,8 @@ export const fetchAdvisories = async (
       const { data, headers } = await client.get<Advisory[]>('https://api.github.com/advisories', {
         params: {
           type: 'reviewed', ecosystem: 'npm', severity,
-          affects: FE_PACKAGES.join(','), modified: `>=${since}`,
+          // Filter packages locally; use a date-only search range without fractional seconds.
+          modified: `>=${sinceDate}`,
           per_page: 100, sort: 'updated', direction: 'desc',
           ...(after ? { after } : {}),
         },
@@ -92,6 +94,29 @@ export const fetchAdvisories = async (
     } while (after);
   }
   return news;
+};
+
+export const formatNewsError = (error: unknown): string => {
+  if (!axios.isAxiosError(error)) {
+    return error instanceof Error ? error.message : 'Security news failed';
+  }
+  const { config, response } = error;
+  let endpoint = 'HTTP request';
+  if (config?.url) {
+    const url = new URL(config.url, config.baseURL);
+    endpoint = `${config.method?.toUpperCase() ?? 'GET'} ${url.origin}${url.pathname}`;
+  }
+  const message = typeof response?.data?.message === 'string'
+    ? response.data.message.slice(0, 500) : error.message;
+  const fields = Array.isArray(response?.data?.errors)
+    ? response.data.errors.map((item: { field?: string; code?: string; message?: string } | string) =>
+      typeof item === 'string' ? item :
+        [item?.field, item?.code, item?.message]
+          .filter((value) => typeof value === 'string').join(':')
+    ).filter(Boolean).join(', ').slice(0, 500)
+    : '';
+  return `${endpoint}: ${response ? `HTTP ${response.status}: ` : ''}${message}` +
+    (fields ? ` (${fields})` : '');
 };
 
 const xmlText = (text: string): string =>

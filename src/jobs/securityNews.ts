@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import axios from 'axios';
 import { WebClient } from '@slack/web-api';
-import { collectNews, NewsState, sendNews } from '../security/news';
+import { collectNews, formatNewsError, NewsState, sendNews } from '../security/news';
 import { GitHubNewsState } from '../security/state';
 import { nowKst } from '../util/kst';
 
@@ -61,7 +61,7 @@ const main = async () => {
 };
 
 main().catch((error: unknown) => {
-  // HTTP client errors can contain credentials. Log only the message.
-  console.error(error instanceof Error ? error.message : 'Security news failed');
+  // Never log HTTP configuration, headers, or the full error object.
+  console.error(formatNewsError(error));
   process.exitCode = 1;
 });
