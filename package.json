@@ -13,7 +13,9 @@
     "dev:watch": "npm run build:local -- --watch & node --watch local.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:jira-delays": "node --test -r ts-node/register src/jira/delayReminder.test.ts",
-    "remind:jira-delays": "ts-node src/jobs/jiraDelayReminder.ts"
+    "remind:jira-delays": "ts-node src/jobs/jiraDelayReminder.ts",
+    "test:security-news": "node --test -r ts-node/register src/security/*.test.ts",
+    "notify:security-news": "ts-node src/jobs/securityNews.ts"
   },
   "author": "",
   "license": "ISC",

@@ -45,6 +45,48 @@ npm run test:jira-delays
 DRY_RUN=true npm run remind:jira-delays # .env의 Jira 토큰으로 조회, Slack 발송 없음
 ```
 
+### FrontEnd 보안 뉴스 (GitHub Actions)
+
+`.github/workflows/security-news.yml`이 매일 오전 9시(KST, 주말 포함)에 실행됩니다.
+기존 Jira 알림과 별도로 채널 `C0ALN3RU92R`에 발송합니다. 예약 실행은 지연될 수 있습니다.
+
+- 채널 본문은 `2026-11-19 FrontEnd 보안 뉴스` 한 줄입니다.
+- 뉴스 목록은 스레드 댓글 하나에 번호를 붙여 보냅니다.
+  `1. [Critical] 패키지: 간략한 원문 요약 <링크>` 형식입니다.
+  Slack 길이 제한에 가까우면 댓글을 나눕니다.
+- GitHub Advisory Database의 reviewed npm 공지 중 High·Critical만 수집합니다.
+  React, Vite, Next.js, Webpack, esbuild, Rollup, Babel 등 정확한 감시 목록은
+  `src/security/news.ts`의 `FE_PACKAGES`에 있습니다. npm 전체나 모든 전이 의존성을 감시하지는 않습니다.
+- Node.js 런타임은 공식 보안 RSS와 공식 사이트의 Markdown 원문에서 별도로 수집합니다.
+  상세 공지에서 High·Critical로 표시한 취약점만 알립니다. 상세 내용이 없는 사전 예고는 제외합니다.
+- 최초 실행은 최근 14일을 조회합니다. 이후에는 마지막 성공 시점부터 하루를 겹쳐 조회합니다.
+  Node.js 공지는 최소 최근 14일을 다시 확인합니다. 원본 DB 반영이 늦거나 RSS에서 빠진 공지는 놓칠 수 있습니다.
+- 새 뉴스가 없으면 제목도 보내지 않습니다. 이미 보낸 항목은 생략합니다.
+  심각도·요약·영향 버전·수정 버전이 바뀌면 다시 알립니다.
+  같은 날 다시 실행하면 기존 스레드에 번호를 이어서 추가합니다.
+- 발송 기록은 별도 `security-news-state` 브랜치의 `security-news/<채널 ID>.json`에 저장합니다.
+  정상 발송한 댓글마다 저장하므로 runner가 바뀌어도 기록을 유지합니다.
+  Slack 발송 직후 기록 저장 전에 프로세스가 끊기면 중복 가능성이 있습니다.
+  전송 ID를 재사용하지만 정확히 한 번 발송을 보장하지는 않습니다.
+  이 브랜치를 삭제하면 발송 기록도 사라집니다.
+
+**활성화:** 기존 `SLACK_BOT_TOKEN`을 재사용합니다. 봇을 `C0ALN3RU92R`에 초대하세요.
+Workflow를 기본 브랜치에 반영하세요. Lambda 배포나 추가 외부 서비스는 필요 없습니다.
+발송 기록을 쓰기 위해 workflow의 `GITHUB_TOKEN`에 `contents: write`가 필요합니다.
+조직 정책이나 브랜치 규칙이 `security-news-state` 생성·쓰기를 막지 않아야 합니다.
+
+Actions → FrontEnd security news → Run workflow에서 `dry_run: true`로 미리보기하세요.
+미리보기는 Slack 발송과 브랜치 생성·기록 저장을 하지 않습니다.
+`false`로 실행하면 실제로 발송하고 기록을 저장합니다.
+
+```bash
+npm run test:security-news
+DRY_RUN=true npm run notify:security-news # 공개 공지 조회, Slack 발송 없음
+```
+
+로컬에서 GitHub 실행 환경변수가 없으면 빈 발송 기록으로 미리보기합니다.
+따라서 실제 Actions의 중복 제거 결과와 다를 수 있습니다.
+
 ## ⚠️ 개발 & 테스트 — 반드시 읽기
 
 **슬래시 커맨드와 모달 등 Slack 상호작용은 배포 후 Slack에서 직접 확인해야 합니다.**
