@@ -1,0 +1,14 @@
+{
+  "name": "fe1-jira-reminder",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "24"
+  },
+  "dependencies": {
+    "@slack/web-api": "^8.5.0",
+    "axios": "^1.7.2",
+    "firebase-admin": "^14.5.1",
+    "firebase-functions": "^7.4.0"
+  }
+}

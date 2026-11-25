@@ -21,7 +21,8 @@ interface SearchResponse {
 
 export const fetchDelayedIssues = async (
   today: string,
-  client: AxiosInstance = jiraClient
+  client: AxiosInstance = jiraClient,
+  maxPages = Infinity
 ): Promise<DelayIssue[]> => {
   const jql =
     'project = FEHG AND statusCategory != Done AND (' +
@@ -31,7 +32,7 @@ export const fetchDelayedIssues = async (
   const seenTokens = new Set<string>();
   let nextPageToken: string | undefined;
 
-  do {
+  for (let page = 1; ; page++) {
     const { data } = await client.get<SearchResponse>('/search/jql', {
       params: {
         jql,
@@ -43,12 +44,15 @@ export const fetchDelayedIssues = async (
     });
     issues.push(...data.issues);
     if (data.isLast || !data.nextPageToken) break;
+    if (page >= maxPages) {
+      throw new Error('Jira pagination limit exceeded');
+    }
     if (seenTokens.has(data.nextPageToken)) {
       throw new Error('Jira returned a repeated pagination token');
     }
     nextPageToken = data.nextPageToken;
     seenTokens.add(nextPageToken);
-  } while (nextPageToken);
+  }
 
   return issues;
 };

@@ -1,15 +1,7 @@
-name: Jira delay reminder
+name: Jira delay reminder preview
 
 on:
-  schedule:
-    # 17:00 Asia/Seoul, Monday-Friday (UTC+9, no daylight saving).
-    - cron: '0 8 * * 1-5'
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Preview only (do not send to Slack)
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -33,6 +25,4 @@ jobs:
       - run: npm run remind:jira-delays
         env:
           ATLASSIAN_TOKEN: ${{ secrets.ATLASSIAN_TOKEN }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          JIRA_DELAY_SLACK_CHANNEL: C04HYKFMXT2
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          DRY_RUN: 'true'
