@@ -3,6 +3,12 @@ node_modules/
 dist/
 .serverless/
 app.js
+/firebase-jira/.env.*
+/firebase-jira/.env
+/firebase-jira/.secret.local
+/firebase-jira/lib/
+/firebase-debug.log
+/firebase-debug.*.log
 
 # OS
 .DS_Store

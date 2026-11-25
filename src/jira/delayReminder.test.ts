@@ -177,3 +177,15 @@ test('rejects repeated pagination tokens instead of sending a partial report', a
   await assert.rejects(fetchDelayedIssues(today, client), /repeated pagination token/);
 });
 
+test('stops at the page budget if Jira has more issues', async () => {
+  let requests = 0;
+  const client = axios.create({
+    adapter: async (config) => ({
+      config, status: 200, statusText: 'OK', headers: {},
+      data: { issues: [], nextPageToken: `page-${++requests}` },
+    }),
+  });
+  await assert.rejects(fetchDelayedIssues(today, client, 2), /pagination limit exceeded/);
+  assert.equal(requests, 2);
+});
+

@@ -1,0 +1,10 @@
+{
+  "functions": [
+    {
+      "source": "firebase-jira",
+      "codebase": "jira-reminder",
+      "ignore": [".git", "node_modules", "index.ts", ".secret.local", "firebase-debug.log", "firebase-debug.*.log"],
+      "predeploy": "npm run test:jira-delays && npm run build:jira-firebase"
+    }
+  ]
+}

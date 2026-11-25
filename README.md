@@ -19,11 +19,10 @@ FE1 팀 업무를 Slack 안에서 처리해주는 봇입니다. `/fe1` 슬래시
 
 이 외에 Chrome Extension 용 API(`/api/*`)도 같은 Lambda 에서 서빙합니다.
 
-### Jira 일정 지체 알림 (GitHub Actions)
+### Jira 일정 지체 알림 (Firebase)
 
-`.github/workflows/jira-delay-reminder.yml`이 월~금 오후 5시(KST)에 실행됩니다.
-AWS를 거치지 않고 Jira 조회 후 Slack 채널 `C04HYKFMXT2`로 발송합니다.
-GitHub 예약 실행은 지연될 수 있습니다. 공휴일도 실행합니다.
+Firebase 예약 함수 `jiraDelayReminder`가 월~금 오후 5시(KST)에 실행합니다. 공휴일도 실행합니다.
+Jira 조회 후 Slack 채널 `C04HYKFMXT2`로 발송합니다. 오후 5시 30분 이후에는 자동으로 발송하지 않습니다.
 
 - 시작일(`customfield_10015`)이 오늘보다 과거이고 To Do 상태 범주인 FEHG 티켓을 알립니다.
 - 종료일(`duedate`)이 오늘 이하이고 Done 상태 범주가 아닌 FEHG 티켓을 알립니다.
@@ -31,14 +30,26 @@ GitHub 예약 실행은 지연될 수 있습니다. 공휴일도 실행합니다
 - 담당자별로 묶고 `SLACK_JIRA_USER_MAP`으로 멘션합니다. 매핑이 없으면 Jira 표시 이름을 씁니다. 미할당 티켓은 `담당자 없음`으로 표시합니다.
 - 두 조건에 모두 해당하면 두 구역에 각각 표시합니다. 대상 티켓이 없으면 발송하지 않습니다.
 
-**활성화:** 저장소 Settings → Secrets and variables → Actions에 `ATLASSIAN_TOKEN`과
-`SLACK_BOT_TOKEN`을 등록하세요. Jira 토큰은 `JIRA_CONFIG.EMAIL` 계정의 토큰을 쓰세요.
-봇을 대상 채널에 초대하세요. Workflow를 기본 브랜치에 반영해야 예약 실행합니다.
-Lambda 배포는 필요 없습니다.
+**첫 배포 및 전환:**
 
-Actions → Jira delay reminder → Run workflow에서 수동 실행할 수 있습니다.
-`dry_run` 기본값은 `true`입니다. 이때 메시지를 실행 로그에만 출력합니다.
-`false`로 실행하면 채널에 실제 발송합니다. 예약 실행은 실제 발송합니다.
+1. `ignite-fe1`이 Blaze인지 확인하세요. 무료 체험을 쓰는 경우 연결한 결제 계정이 **무료 체험판**인지도 확인하세요.
+2. 아래 명령으로 시크릿 두 개를 등록하고 함수만 배포하세요. Jira 토큰은 `JIRA_CONFIG.EMAIL` 계정의 토큰을 사용하세요. 처음에는 `JIRA_DELAY_SEND_ENABLED`를 설정하지 마세요. 기본값은 `false`입니다.
+3. Cloud Scheduler에서 `firebase-schedule-jiraDelayReminder-us-central1`을 수동으로 실행해 함수 로그의 `preview`, `date`, `count`를 확인하세요. 미리보기는 Jira만 조회합니다. 실제 예약 시각도 평일 17시 실행 로그에서 확인하세요.
+4. 실제 발송 전에 Firestore `(default)` DB가 없으면 Native 모드로 `us-central1`에 만드세요. 함수의 **런타임 서비스 계정**에 `roles/datastore.user` 권한이 있는지 확인하세요. 같은 날짜의 발송 시도를 한 번으로 제한합니다. Slack 응답이 불명확하거나 일부 발송이 실패해도 같은 날 자동으로 재발송하지 않습니다.
+5. 이 변경을 `main`에 반영해 GitHub의 기존 Jira 예약을 먼저 끄세요. 이전 Jira 실행이 대기·실행 중이지 않은지 확인하세요. 그날 이미 발송했다면 다음 평일부터 전환하세요. `firebase-jira/.env.ignite-fe1`에 `JIRA_DELAY_SEND_ENABLED=true`를 설정하고 같은 함수만 다시 배포하세요. 전환 이후 GitHub 수동 실행은 미리보기만 합니다.
+
+```bash
+npm ci
+npm ci --prefix firebase-jira
+npx firebase-tools login
+npx firebase-tools functions:secrets:set ATLASSIAN_TOKEN --project ignite-fe1
+npx firebase-tools functions:secrets:set SLACK_BOT_TOKEN --project ignite-fe1
+npx firebase-tools deploy --only functions:jira-reminder --project ignite-fe1
+npx firebase-tools functions:artifacts:setpolicy --days 1 --location us-central1 --project ignite-fe1
+```
+
+함수는 인스턴스를 상시 실행하지 않으며 최대 1개만 실행합니다. 예약은 1개입니다.
+예산 알림은 청구 상한이 아닙니다. 무료 체험이 만료되면 함수가 중단될 수 있으므로 만료 전에 운영 방식을 결정하세요.
 
 ```bash
 npm run test:jira-delays
